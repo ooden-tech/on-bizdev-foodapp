@@ -17,11 +17,8 @@
   // =============================================================
   // CATEGORY 1: USER CONTEXT (6 tools)
   // =============================================================
-      }
-    }
-  },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "manage_health_constraints",
       description: "Smartly adds or removes health constraints (allergies, intolerances, medical conditions) based on natural language. Use this for specific updates like 'I'm allergic to peanuts' or 'I can eat dairy now'.",
@@ -37,8 +34,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "update_user_profile",
       description: "Updates general profile info (dietary preferences, goals). For specific allergies/conditions, use manage_health_constraints instead.",
@@ -67,8 +64,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "get_user_profile",
       description: "Retrieves the user's profile including height, weight, age, activity level, dietary preferences, and goal (e.g., 'lose weight', 'maintain', 'gain muscle'). Use this to understand the user's overall health context.",
@@ -79,8 +76,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "get_user_goals",
       description: "Retrieves the user's nutrition targets including calories, protein, carbs, fat, fiber, sugar, sodium. Returns target values and units.",
@@ -91,8 +88,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "get_today_progress",
       description: "Gets the user's food log totals for today - what they've already eaten. Returns calories, protein, carbs, fat, etc. consumed today.",
@@ -103,8 +100,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "get_weekly_summary",
       description: "Gets 7-day summary including daily averages, trends, and goal compliance percentage. Reuses existing dashboard aggregation logic.",
@@ -115,8 +112,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "get_food_history",
       description: "Gets detailed food log history for pattern analysis. Useful for understanding eating habits over time.",
@@ -131,11 +128,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 2: DELEGATION (3 tools) - Ask specialist agents
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 2: DELEGATION (3 tools) - Ask specialist agents
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "ask_nutrition_agent",
       description: "Delegate nutrition tasks to the specialist NutritionAgent. Use for food lookups, estimates, and comparisons. Returns enriched response with confidence levels.",
@@ -162,8 +159,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "ask_recipe_agent",
       description: "Delegate recipe tasks to the specialist RecipeAgent. Use for searching saved recipes and getting recipe details.",
@@ -192,8 +189,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "ask_insight_agent",
       description: "Delegate insight/analysis tasks to the specialist InsightAgent. Use for forensic audits, pattern recognition, comparisons, and reflection.",
@@ -231,11 +228,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 3: NUTRITION SUPPORT (2 tools)
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 3: NUTRITION SUPPORT (2 tools)
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "validate_nutrition",
       description: "Validates if nutrition data is reasonable. Use this to check for obviously wrong values like 0-calorie chicken.",
@@ -265,8 +262,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "compare_foods",
       description: "Compares nutrition of multiple foods side by side. Useful for helping users choose between options.",
@@ -287,11 +284,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 4: RECIPES SUPPORT (2 tools)
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 4: RECIPES SUPPORT (2 tools)
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "parse_recipe_text",
       description: "Parses recipe text from natural language into structured ingredients list. Use this when user provides recipe details.",
@@ -313,8 +310,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "calculate_recipe_serving",
       description: "Calculates nutrition for a specific portion/serving of a recipe.",
@@ -337,11 +334,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 5: LOGGING (3 tools) - PCC Pattern
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 5: LOGGING (3 tools) - PCC Pattern
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "propose_food_log",
       description: "Proposes logging a food item. The user will see a confirmation card and must approve before it's saved. Returns proposal data for the UI.",
@@ -407,8 +404,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "propose_recipe_log",
       description: "Proposes logging a saved recipe. User must confirm before it's saved.",
@@ -462,8 +459,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "confirm_pending_log",
       description: "Called when user confirms a pending food or recipe log. This tool is typically called by the system when user clicks confirm.",
@@ -481,11 +478,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 6: GOALS (3 tools)
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 6: GOALS (3 tools)
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "update_user_goal",
       description: "Proposes updating a user's nutrition goal. Returns a confirmation card for user approval.",
@@ -524,8 +521,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "apply_daily_workout_offset",
       description: "Applies a nutritional offset for today based on a workout. Adds a 'bonus' to daily targets.",
@@ -551,8 +548,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "bulk_update_user_goals",
       description: "Proposes updating multiple nutrition goals at once. Returns a summary confirmation card.",
@@ -579,8 +576,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "calculate_recommended_goals",
       description: "Calculates recommended nutrition goals based on user profile (TDEE calculation). Uses height, weight, age, activity level, and goal.",
@@ -591,11 +588,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 7: INSIGHTS SUPPORT (1 tool)
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 7: INSIGHTS SUPPORT (1 tool)
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "get_food_recommendations",
       description: "Gets food suggestions based on remaining nutritional needs for the day. Considers what user has already eaten.",
@@ -614,11 +611,11 @@
       }
     }
   },
-// =============================================================
-// CATEGORY 8: MEMORY & PERSONALIZATION (2 tools)
-// =============================================================
-{
-  type: "function",
+  // =============================================================
+  // CATEGORY 8: MEMORY & PERSONALIZATION (2 tools)
+  // =============================================================
+  {
+    type: "function",
     function: {
       name: "store_memory",
       description: "Collects and stores a new user preference, habit, or health constraint.",
@@ -639,8 +636,8 @@
       }
     }
   },
-{
-  type: "function",
+  {
+    type: "function",
     function: {
       name: "search_memory",
       description: "Searches the user's learned context for relevant information.",

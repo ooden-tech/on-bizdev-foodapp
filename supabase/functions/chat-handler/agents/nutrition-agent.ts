@@ -664,7 +664,8 @@ export class NutritionAgent {
         }
 
         // Step 3: Internal Verification (Self-Reflection) - Feature Fix for Issue 2
-        const verified = await this.verifyNutrition(itemName, searchPortion, scaled);
+        const verified = await this.verifyNutrition(itemName, searchPortion, scaled, trackedNutrients);
+
         return verified;
 
       } else {
@@ -689,7 +690,7 @@ export class NutritionAgent {
           // ... (existing health flags logic)
 
           // Step 3: Internal Verification
-          const verified = await this.verifyNutrition(itemName, searchPortion, scaled);
+          const verified = await this.verifyNutrition(itemName, searchPortion, scaled, trackedNutrients);
           return verified;
         } else {
           // ... (existing failure logic)
@@ -697,6 +698,24 @@ export class NutritionAgent {
         }
       }
     }));
+
+    // Post-processing: Check if originalDescription mentions items NOT in the processed list
+    // This handles cases like "log protein with 200ml water" where water isn't extracted as a separate item.
+    // AI-powered, works for any secondary item (water, milk, butter, sides, condiments, etc.)
+    if (originalDescription && items.length < 3) {
+      try {
+        const additionalItems = await this.extractMissingItems(originalDescription, items, trackedNutrients);
+        if (additionalItems.length > 0) {
+          console.log(`[NutritionAgent] Found ${additionalItems.length} additional items from context:`, additionalItems);
+          const additionalResults = await Promise.all(additionalItems.map(async (item: { name: string, portion: string }) => {
+            return this.estimateNutritionWithLLM(item.name, item.portion, healthConstraints, memories, trackedNutrients, originalDescription);
+          }));
+          results.push(...additionalResults.filter((r: any) => r !== null));
+        }
+      } catch (e) {
+        console.error('[NutritionAgent] extractMissingItems error:', e);
+      }
+    }
 
     return results.filter((r) => r !== null);
   }
@@ -757,13 +776,22 @@ export class NutritionAgent {
 
   /**
    * Step 3: Verify the final nutrition data against common sense.
-   * If a major discrepancy is found (e.g. 0.5g protein for whey), correct it.
+   * Dynamically verifies ALL tracked nutrients, not just hardcoded macros.
    */
-  async verifyNutrition(originalItem: string, originalPortion: string, data: any): Promise<any> {
-    // Skip verification for low confidence items or if explicit override exists?
-    // For now, check everything.
+  async verifyNutrition(originalItem: string, originalPortion: string, data: any, trackedNutrients: string[] = []): Promise<any> {
+    // Dynamically verify ALL tracked nutrients, not just hardcoded macros.
     try {
       const openai = createOpenAIClient();
+      // Build dynamic nutrient data from whatever the user tracks
+      const baseKeys = ['calories', 'protein_g', 'carbs_g', 'fat_total_g'];
+      const allKeys = Array.from(new Set([...baseKeys, ...trackedNutrients]));
+      const nutrientData: Record<string, any> = {};
+      for (const key of allKeys) {
+        if (data[key] !== undefined && data[key] !== null) {
+          nutrientData[key] = data[key];
+        }
+      }
+
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
@@ -776,21 +804,21 @@ export class NutritionAgent {
                       
                       **Context**:
                       - User Request: "${originalItem} ${originalPortion}"
-                      - Generated Data: ${JSON.stringify({ calories: data.calories, protein: data.protein_g, carbs: data.carbs_g, fat: data.fat_total_g })}
+                      - Generated Data: ${JSON.stringify(nutrientData)}
                       
                       **Validation Rules**:
-                      1. **Protein Powder**: ~20-25g protein per scoop/30g. If < 5g, it is WRONG (likely liquid whey).
-                      2. **Eggs**: ~6g protein per large egg. "2 eggs" should be ~12g. If < 5g, it is WRONG.
-                      3. **Calories**: Must match macros roughly (P*4 + C*4 + F*9).
+                      1. Calories must roughly match macros: (protein_g*4 + carbs_g*4 + fat_total_g*9). If macros imply >2x or <0.5x stated calories, WRONG.
+                      2. Check each nutrient for plausibility given the food and portion. Flag obviously too high or too low values.
+                      3. Common sense: protein powder scoop ~24g protein (not 120g), bowl of rice ~45g carbs (not 200g), egg ~6g protein.
                       
                       **Output**:
                       Return JSON:
                       {
                           "status": "valid" | "invalid",
                           "reason": string,
-                          "corrected_data": { ...macros } | null
+                          "corrected_data": { "calories": number, "protein_g": number, "carbs_g": number, "fat_total_g": number } | null
                       }
-                      If "invalid", provide the CORRECT macros for the User's Request.`
+                      If "invalid", provide the CORRECT values using the exact key names: calories, protein_g, carbs_g, fat_total_g.`
           },
           { role: "user", content: "Verify this data." }
         ],
@@ -802,9 +830,20 @@ export class NutritionAgent {
 
       if (verification.status === "invalid" && verification.corrected_data) {
         console.warn(`[NutritionAgent] Verification FAILED for ${originalItem}. Correcting... Reason: ${verification.reason}`);
+        // FIX: Normalize corrected_data keys to match data schema.
+        // Previously, LLM returned {protein: 24} but data uses protein_g, so merge silently failed.
+        const corrected = verification.corrected_data;
+        const normalizedCorrection: Record<string, any> = {};
+        for (const [key, val] of Object.entries(corrected)) {
+          // Map common short names to schema names
+          if (key === 'protein') normalizedCorrection['protein_g'] = val;
+          else if (key === 'carbs') normalizedCorrection['carbs_g'] = val;
+          else if (key === 'fat' || key === 'fat_total') normalizedCorrection['fat_total_g'] = val;
+          else normalizedCorrection[key] = val;
+        }
         return {
           ...data,
-          ...verification.corrected_data,
+          ...normalizedCorrection,
           confidence: 'medium', // Downgrade confidence if we had to correct
           error_sources: [...(data.error_sources || []), 'verification_correction']
         };
@@ -815,6 +854,51 @@ export class NutritionAgent {
     } catch (e) {
       console.error('[NutritionAgent] Verification error:', e);
       return data; // Return original if verification fails
+    }
+  }
+
+  /**
+   * AI-powered: Extract additional food items/beverages from the original description
+   * that weren't captured as explicit items. Handles water, milk, sides, condiments, etc.
+   */
+  async extractMissingItems(originalDescription: string, processedItems: string[], trackedNutrients: string[]): Promise<{ name: string, portion: string }[]> {
+    try {
+      const openai = createOpenAIClient();
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a nutrition context analyzer. The user described what they ate/drank, and we already extracted specific items from their description. Your job is to identify any ADDITIONAL food items or beverages mentioned that we missed.
+
+Rules:
+- Only return items explicitly mentioned or strongly implied in the description.
+- Do NOT invent items that aren't there.
+- Water, milk, juice, and other beverages count as separate items.
+- Condiments, sides, and mix-ins count if explicitly mentioned (e.g. "with butter", "with ketchup").
+- If no additional items are found, return an empty array.
+
+User's tracked nutrients: ${trackedNutrients.join(', ') || 'calories, protein, carbs, fat'}
+
+Return JSON: { "additional_items": [{ "name": string, "portion": string }] }`
+          },
+          {
+            role: 'user',
+            content: `Original description: "${originalDescription}"
+Already processed items: ${JSON.stringify(processedItems)}
+
+Are there additional items in the description that we missed?`
+          }
+        ],
+        response_format: { type: 'json_object' }
+      });
+
+      const content = response.choices[0].message.content;
+      const parsed = content ? JSON.parse(content) : { additional_items: [] };
+      return parsed.additional_items || [];
+    } catch (e) {
+      console.error('[NutritionAgent] extractMissingItems error:', e);
+      return [];
     }
   }
 
@@ -913,7 +997,8 @@ export class NutritionAgent {
               "error_sources": string[],
               "error_sources": string[],
               "health_flags": string[],
-              // Dynamic fields for tracked nutrients (e.g. hydration_ml)
+              "hydration_ml": number, // Explicitly track water/liquid content in ml
+              // Dynamic fields for tracked nutrients
               [key: string]: any
             }
             If you are completely unsure, return null.`
@@ -921,6 +1006,9 @@ export class NutritionAgent {
           {
             role: 'user',
             content: `Estimate nutrition for: "${itemName}". ${userPortion ? `User portion: "${userPortion}".` : ''}
+          ${originalDescription && originalDescription !== itemName
+                ? `\nOriginal user request: "${originalDescription}". If the original request mentions water, milk, or other liquid mixers, include the liquid volume in 'hydration_ml'.`
+                : ''}
           
           CRITICAL INSTRUCTION: coverage of the quantity is MANDATORY.
           - If I provided a specific weight (e.g. "200g"), you MUST set 'serving_size' to that exact string.
@@ -940,7 +1028,7 @@ export class NutritionAgent {
       const parsed = JSON.parse(content);
       if (!parsed.calories && parsed.calories !== 0) return null;
 
-      return {
+      const result: any = {
         food_name: parsed.food_name || itemName,
         calories: parsed.calories,
         protein_g: parsed.protein_g || 0,
@@ -968,7 +1056,6 @@ export class NutritionAgent {
         },
         error_sources: parsed.error_sources || ['llm_estimation'],
         // @ts-ignore
-        health_flags: parsed.health_flags || []
         health_flags: parsed.health_flags || []
       };
 

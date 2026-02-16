@@ -40,11 +40,19 @@ You must evaluate the "Caloric Variance Risk" of the request.
 - **none**: Crystal clear (e.g., "log 100g grilled chicken breast").
 
 STRICT RULES FOR AMBIGUITY:
-1.  **Unstandardized Containers -> HIGH**: words like "bowl", "plate", "cup" (unless standard measuring cup), "handful", "serving" (when not defined by label) are ALWAYS HIGH ambiguity. (e.g., "bowl of pasta" -> HIGH).
-2.  **Generic Composite Meals -> HIGH**: words like "pasta", "sandwich", "curry", "stew", "salad" without ingredient details are ALWAYS HIGH ambiguity.
-3.  **Missing Quantities for Dense Foods -> HIGH**: "cheese", "nuts", "oil", "butter" without quantity are ALWAYS HIGH ambiguity.
-4.  **Natural/Commercial Units -> MEDIUM**: "1 apple", "1 egg", "1 slice of bread", "1 can of soda" are SAFE to guess (Medium/Low).
-5.  **Brand Missing -> MEDIUM**: If the food is generic (e.g., "Greek yogurt") but the portion is clear ("1 cup"), it is MEDIUM (safe to guess average).
+1.  **Unstandardized Containers -> HIGH** (only if no standard reference exists):
+    "bowl", "plate" -> HIGH only if no food specificity. "bowl of plain rice" -> MEDIUM (standard rice per bowl estimable).
+2.  **Generic Composite Meals**: "pasta", "sandwich", "curry" etc.
+    - -> **HIGH** only if NO ingredients/type specified (e.g., just "log sandwich").
+    - -> **MEDIUM** if type is specified (e.g., "PBJ sandwich", "carbonara", "grilled cheese") even without exact weights.
+    - -> **LOW** if ingredients AND quantities are provided.
+3.  **Missing Quantities for Dense Foods -> HIGH**: "Peanut butter", "Oil", "Cheese" -> HIGH if no quantity.
+4.  **Branded/Specific Items -> LOW**: "Big Mac", "Oreo", "1 large egg".
+5.  **Liquids -> LOW**: "Glass of milk", "Can of coke".
+6.  **Clarification Context**: If the message starts with '[Context: ...]', the user has already been asked to clarify.
+    Treat their response as resolving the ambiguity. Set ambiguity_level to at most MEDIUM unless the response introduces NEW ambiguity.
+7.  **"Standard" / "Typical" / "Assume"**: If the user says "assume standard", "typical", "regular", or "just a normal X",
+    they are explicitly accepting estimation variance. Set ambiguity to MEDIUM at most.
 
 INTENT CLARIFICATION RULES:
 1.  **Hypothetical vs. Actual**:

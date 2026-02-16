@@ -72,7 +72,7 @@ export class ToolExecutor {
           return this.compareFoods(args.foods);
         // Legacy tool handlers - kept for backward compatibility with orchestrator direct calls
         case 'lookup_nutrition':
-          return this.lookupNutrition(args.food, args.portion, args.calories, args.macros);
+          return this.lookupNutrition(args.food, args.portion, args.calories, args.macros, args.originalDescription);
         case 'estimate_nutrition':
           return this.estimateNutrition(args.description, args.portion, args.calories_hint, args.tracked_nutrients);
         case 'search_saved_recipes':

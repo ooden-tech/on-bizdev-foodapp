@@ -75,6 +75,10 @@ function decorateWithContext(message: string, pendingAction: any): string {
   const todayDate = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
   const dayClassification = await db.getDayClassification(userId, todayDate);
 
+  // Feature 10: Tracked Nutrients from Goals
+  const userGoals = await db.getUserGoals(userId);
+  const trackedNutrients = userGoals?.map((g: any) => g.nutrient) || [];
+
   const context = {
     userId,
     sessionId,
@@ -83,7 +87,8 @@ function decorateWithContext(message: string, pendingAction: any): string {
     session,
     healthConstraints,
     memories,
-    dayClassification // { day_type: 'travel' | 'sick' | ..., notes: ... }
+    dayClassification, // { day_type: 'travel' | 'sick' | ..., notes: ... }
+    trackedNutrients
   };
   const startTime = Date.now();
   const thoughts = new ThoughtLogger();
@@ -103,7 +108,10 @@ function decorateWithContext(message: string, pendingAction: any): string {
     // STEP 0: Context Merging (Ambiguity Handling)
     // =========================================================
     // Check if we are returning from a clarification
-    const pendingClarification = await sessionService.getClarificationContext(userId);
+    // FIX: Use the session already loaded at startup instead of a separate DB query.
+    // getClarificationContext uses .maybeSingle() which silently fails when multiple
+    // session rows exist for the same user, causing clarification context to be lost.
+    const pendingClarification = session?.buffer?.pending_clarification || null;
     let augmentedMessage = message;
 
     if (pendingClarification) {
@@ -291,8 +299,16 @@ function decorateWithContext(message: string, pendingAction: any): string {
     // =========================================================
     // STEP 2.5: Ambiguity Check
     // =========================================================
-    // Only trigger clarification if we are NOT already in a clarification flow
-    // If we have pending clarification context (augmentedMessage !== message), we want ReasoningAgent to handle it
+    // After one clarification, NEVER clarify again. Proceed with low confidence instead.
+    // This prevents interrogating the user. If they gave us more info and it's still ambiguous,
+    // just do our best estimate and propose with low confidence.
+    if (intentResult.ambiguity_level === 'high' && augmentedMessage !== message) {
+      console.log('[OrchestratorV3] Post-clarification still HIGH ambiguity. Proceeding with low confidence instead of re-asking.');
+      intentResult.ambiguity_level = 'medium';
+      intentResult.confidence = 'low';
+    }
+
+    // Only trigger clarification ONCE (first time, no prior clarification context)
     if (intentResult.ambiguity_level === 'high' && augmentedMessage === message) {
       console.log('[OrchestratorV3] High ambiguity detected. Triggering clarification flow.');
       reportStep('Asking for clarification...');
@@ -534,10 +550,34 @@ function decorateWithContext(message: string, pendingAction: any): string {
           const nutritionData = await toolExecutor.execute('lookup_nutrition', {
             food,
             portion,
-            calories: intentResult.calories,
-            macros: intentResult.macros,
-            originalDescription: message
+            calories: intentResult.calories, // Use intentResult.calories for consistency
+            protein_g: intentResult.macros?.protein_g,
+            carbs_g: intentResult.macros?.carbs_g,
+            fat_total_g: intentResult.macros?.fat_total_g,
+            healthConstraints: context.healthConstraints, // Assuming healthConstraints is in context
+            memories: context.memories, // Assuming memories is in context
+            trackedNutrients: context.trackedNutrients, // Assuming trackedNutrients is in context
+            originalDescription: message // Pass original message for context (e.g. "with water")
           });
+
+          // SAFETY CHECK: Block logging if food conflicts with health constraints
+          // FIX: Cross-reference LLM-generated health flags (e.g. "Contains peanuts")
+          // against the user's actual health constraints by category + severity.
+          // Previously checked for "CRITICAL" substring which never matched the LLM output format.
+          const criticalFlags = (nutritionData.health_flags || []).filter((flag: string) => {
+            const lowerFlag = flag.toLowerCase();
+            return (context.healthConstraints || []).some((c: any) =>
+              c.severity === 'critical' && lowerFlag.includes(c.category.toLowerCase())
+            );
+          });
+
+          if (criticalFlags.length > 0) {
+            console.warn(`[OrchestratorV3] Health Warning for "${food}": ${criticalFlags.join(', ')}`);
+            // FIX: Don't block — user wants WARNING not BLOCK.
+            // Add warning to nutritionData so it shows in the proposal, but continue with normal flow.
+            nutritionData.health_warning = `⚠️ Heads up: this contains ${criticalFlags.map((f: string) => f.replace(/contains /i, '').replace(/may contain /i, '')).join(', ')}. Please confirm you're okay with this.`;
+          }
+
           const proposal = await toolExecutor.execute('propose_food_log', {
             ...nutritionData
           });
