@@ -317,7 +317,12 @@ function convertToGrams(amount, unit) {
     'oz': 28.35,
     'ounce': 28.35,
     'lb': 453.59,
-    'pound': 453.59
+    'lb': 453.59,
+    'pound': 453.59,
+    'scoop': 30, // Standard protein powder scoop
+    'heaping scoop': 45, // Large/heaping scoop
+    'small scoop': 15,
+    'large scoop': 45
   };
   return units[unit] ? amount * units[unit] : null;
 }
@@ -339,7 +344,12 @@ function convertToMl(amount, unit) {
     'qt': 946.35,
     'quart': 946.35,
     'gal': 3785.41,
-    'gallon': 3785.41
+    'gallon': 3785.41,
+    'bowl': 500, // Standard bowl ~2 cups
+    'large bowl': 750,
+    'small bowl': 300,
+    'glass': 240,
+    'mug': 350
   };
   return units[unit] ? amount * units[unit] : null;
 }
@@ -454,7 +464,7 @@ export class NutritionAgent {
       const category = constraint.category.toLowerCase();
       // 1. Direct match (e.g. constraint "strawberry" matches "strawberry jam")
       if (normalizedFood.includes(category)) {
-        flags.push(`${constraint.severity === 'critical' ? 'CRITICAL: ' : ''}Contains ${category}`);
+        flags.push(`${constraint.severity === 'high' || constraint.severity === 'critical' ? 'CRITICAL: ' : ''}Contains ${category}`);
         continue;
       }
 
@@ -463,7 +473,10 @@ export class NutritionAgent {
       if (keywords) {
         for (const keyword of keywords) {
           if (normalizedFood.includes(keyword)) {
-            flags.push(`${constraint.severity === 'critical' ? 'CRITICAL: ' : ''}May contain ${category} (${keyword})`);
+            if (normalizedFood.includes(keyword)) {
+              flags.push(`${constraint.severity === 'high' || constraint.severity === 'critical' ? 'CRITICAL: ' : ''}May contain ${category} (${keyword})`);
+              break;
+            }
             break;
           }
         }
@@ -556,7 +569,7 @@ export class NutritionAgent {
   }
 
   async execute(input: any, context: any) {
-    const { items, portions } = input;
+    const { items, portions, trackedNutrients = [], originalDescription } = input;
     const supabase = context.supabase || createAdminClient();
     const memories = context.memories || [];
     const healthConstraints = context.healthConstraints || [];
@@ -586,6 +599,10 @@ export class NutritionAgent {
       const normalizedInput = await this.normalizeInput(itemName, userPortion);
       const searchName = normalizedInput.canonical_name;
       const searchPortion = normalizedInput.quantity_amount ? `${normalizedInput.quantity_amount} ${normalizedInput.quantity_unit}` : userPortion;
+
+      // Extract hydration context if "water" or liquid mentioned in original text
+      // (This helps if normalizeInput stripped it out)
+      // Note: We rely on estimateNutritionWithLLM for the heavy lifting if cache miss.
 
       console.log(`[NutritionAgent] Normalized "${itemName}" (${userPortion}) -> "${searchName}" (${searchPortion})`);
 
@@ -653,8 +670,15 @@ export class NutritionAgent {
       } else {
         // 5. Final fallback: LLM Estimation
         console.log(`[NutritionAgent] No data from API/Cache for "${searchName}", trying LLM estimation`);
-        // Pass the NORMALIZED name and portion to LLM
-        const estimation = await this.estimateNutritionWithLLM(searchName, searchPortion, healthConstraints, memories);
+        // Pass the NORMALIZED name and portion to LLM, plus tracked nutrients and original text
+        const estimation = await this.estimateNutritionWithLLM(
+          searchName,
+          searchPortion,
+          healthConstraints,
+          memories,
+          trackedNutrients,
+          originalDescription || itemName
+        );
 
         if (estimation) {
           // ... (existing scaling logic)
@@ -701,6 +725,8 @@ export class NutritionAgent {
                     2. **Portion Standardization**:
                        - Convert vague counts to grams if possible. E.g. "2 eggs" -> 100g.
                        - "1 scoop" -> ~30g (for powders).
+                       - "Bowl" -> "Large Serving" or convert to ~400-500g (for meals like pasta).
+                       - "Restaurant portion" -> "1.5 servings" (multiply standard by 1.5).
                     3. **Output**: JSON Only.
                     {
                         "canonical_name": string,
@@ -792,7 +818,14 @@ export class NutritionAgent {
     }
   }
 
-  async estimateNutritionWithLLM(itemName: string, userPortion?: string, healthConstraints?: any[], memories?: any[]): Promise<EnrichedNutritionResult | null> {
+  async estimateNutritionWithLLM(
+    itemName: string,
+    userPortion?: string,
+    healthConstraints?: any[],
+    memories?: any[],
+    trackedNutrients: string[] = [],
+    originalDescription?: string
+  ): Promise<EnrichedNutritionResult | null> {
     try {
       console.log(`[NutritionAgent] Estimating for: "${itemName}" (Portion: ${userPortion || 'N/A'})`);
       const openai = createOpenAIClient();
@@ -878,7 +911,10 @@ export class NutritionAgent {
                   "fat_total_g": "low" | "medium" | "high"
               },
               "error_sources": string[],
-              "health_flags": string[] (OPTIONAL)
+              "error_sources": string[],
+              "health_flags": string[],
+              // Dynamic fields for tracked nutrients (e.g. hydration_ml)
+              [key: string]: any
             }
             If you are completely unsure, return null.`
           },
@@ -933,7 +969,20 @@ export class NutritionAgent {
         error_sources: parsed.error_sources || ['llm_estimation'],
         // @ts-ignore
         health_flags: parsed.health_flags || []
+        health_flags: parsed.health_flags || []
       };
+
+      // Add any tracked nutrients found in the response
+      trackedNutrients.forEach(key => {
+        if (parsed[key] !== undefined && result[key] === undefined) {
+          result[key] = parsed[key];
+        }
+      });
+
+      // Specifically ensure hydration_ml is captured if returned
+      if (parsed.hydration_ml !== undefined) result.hydration_ml = parsed.hydration_ml;
+
+      return result;
     } catch (e) {
       console.error('[NutritionAgent] LLM estimation failed:', e);
       return null;

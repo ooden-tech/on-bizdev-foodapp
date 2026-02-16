@@ -418,7 +418,7 @@ export class ToolExecutor {
   // NUTRITION TOOLS
   // =============================================================
 
-  async lookupNutrition(food: string, portion: string, calories?: number, macros?: { protein?: number | null, carbs?: number | null, fat?: number | null }) {
+  async lookupNutrition(food: string, portion: string, calories?: number, macros?: { protein?: number | null, carbs?: number | null, fat?: number | null }, originalDescription?: string) {
     console.log(`[ToolExecutor] lookupNutrition for: ${food}${calories ? ` (${calories} kcal)` : ''}`);
 
     // Only trust provided values if they are explicitly non-null and calories > 0
@@ -463,7 +463,7 @@ export class ToolExecutor {
     const items = [food];
     const portions = [portion || '1 serving'];
     // FIX: Pass trackedNutrients so NutritionAgent can estimate all user-tracked nutrients
-    const results: any[] = await this.nutritionAgent.execute({ items, portions, trackedNutrients }, this.agentContext);
+    const results: any[] = await this.nutritionAgent.execute({ items, portions, trackedNutrients, originalDescription }, this.agentContext);
 
     // Define base keys for filtering
     const baseKeys = ['calories', 'protein_g', 'carbs_g', 'fat_total_g'];

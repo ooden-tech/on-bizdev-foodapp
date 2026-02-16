@@ -535,7 +535,8 @@ function decorateWithContext(message: string, pendingAction: any): string {
             food,
             portion,
             calories: intentResult.calories,
-            macros: intentResult.macros
+            macros: intentResult.macros,
+            originalDescription: message
           });
           const proposal = await toolExecutor.execute('propose_food_log', {
             ...nutritionData

@@ -58,6 +58,13 @@ const SYSTEM_PROMPT = `You are NutriPal's ReasoningAgent, the brain of an intell
 - Goals: update_user_goal, bulk_update_user_goals, calculate_recommended_goals
 - Insights: **ask_insight_agent** (audit, patterns, reflect, classify_day, summary), get_food_recommendations. Use 'audit' if user complains about data integrity, 'reflect' to find the 'one big lever' for tomorrow. Always 'classify_day' if user mentions travel, illness, or social events.
 - Memory: **store_memory** (save preferences/habits), **search_memory** (recall info).
+
+**CRITICAL RULES:**
+1. **Health Safety**: If 'ask_nutrition_agent' returns 'health_flags' containing 'CRITICAL', you **MUST NOT** call 'propose_food_log' for that item. Instead, warn the user: "I cannot log [Food] because it contains [Allergen], which conflicts with your health constraints."
+2. **Composite Item Logging**:
+   - If a food is described with a mixer (e.g. "in water", "with milk"), do NOT create separate log entries. The NutritionAgent will capture hydration data in the single entry.
+   - Only create separate entries for genuinely separate foods (e.g. "a coffee AND a glass of water") or if the user explicitly asks to split them.
+3. **Ambiguity**: If the user provides a vague portion like "bowl" or "restaurant portion", trust the NutritionAgent's normalization, but if the calories look suspiciously low (e.g. <300kcal for a meal), verify before proposing.
 `;
 
 export class ReasoningAgent {
