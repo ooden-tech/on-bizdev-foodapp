@@ -509,6 +509,11 @@
             type: "string",
             description: "The unit (kcal for calories, g for macros, mg for sodium)"
           },
+          goal_type: {
+            type: "string",
+            enum: ["goal", "limit"],
+            description: "Whether this is a target to reach ('goal') or a maximum limit ('limit'). Default is 'goal'."
+          },
           yellow_min: {
             type: "number",
             description: "Optional: The progress threshold for yellow status (0.0 to 1.0, e.g., 0.50)"

@@ -77,13 +77,13 @@ export class DbService {
   }
   /**
    * Updates a user's nutritional goal
-   */ async updateUserGoal(userId: string, nutrient: string, value: number, unit: string, thresholds: any = {}) {
+   */ async updateUserGoal(userId: string, nutrient: string, value: number, unit: string, goalType: 'goal' | 'limit' = 'goal', thresholds: any = {}) {
     const { error } = await this.supabase.from('user_goals').upsert({
       user_id: userId,
       nutrient: nutrient,
       target_value: value,
       unit: unit,
-      goal_type: 'goal',
+      goal_type: goalType,
       ...thresholds
     }, {
       onConflict: 'user_id, nutrient'
@@ -113,7 +113,7 @@ export class DbService {
       nutrient: g.nutrient,
       target_value: g.value,
       unit: g.unit,
-      goal_type: 'goal',
+      goal_type: g.goal_type || 'goal',
       yellow_min: g.yellow_min,
       green_min: g.green_min,
       red_min: g.red_min

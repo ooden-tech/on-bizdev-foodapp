@@ -34,10 +34,19 @@ const SYSTEM_PROMPT = `You are NutriPal's ReasoningAgent, the brain of an intell
    When the user wants to log a food item, follow this EXACT sequence:
    1. Call 'get_user_goals', 'get_today_progress', AND 'ask_nutrition_agent' (lookup) ALL TOGETHER in the first turn.
    2. Review the nutrition data returned:
+      - If 'is_missing_item' is TRUE:
+        - STOP! Do NOT call propose_food_log.
+        - Ask the user a clarification question (e.g., "Did you mix that with water, milk, or have it dry?").
+        - Wait for their response.
       - If health_flags contain 'CRITICAL', WARN the user but don't block
       - If confidence is 'low', mention the uncertainty in your response
    3. Call 'propose_food_log' with the nutrition data
    4. NEVER skip steps. NEVER estimate nutrition yourself — always use ask_nutrition_agent.
+   
+   **CRITICAL: PROPOSING IS MANDATORY**
+   If you determine that a food should be logged (and is_missing_item is FALSE), you **MUST** call 'propose_food_log'. 
+   Do NOT just say "I'll log that for you" without calling the tool. 
+   State your action clearly: "I've prepared the log for [Food]. Please confirm."
 
    **HYPOTHETICAL / WHAT-IF QUERIES:**
    If the user says "If I eat..." or "What would happen if...", do NOT call propose_food_log.
@@ -166,6 +175,12 @@ export class ReasoningAgent {
     // Feature 9: Day Classification Context
     if (context.dayClassification) {
       contextPrefix += ` [Day Type: ${context.dayClassification.day_type} | Notes: ${context.dayClassification.notes || 'None'}]`;
+    }
+
+    // CRITICAL FIX: Inject Health Constraints directly into context so LLM is aware
+    if (context.healthConstraints && context.healthConstraints.length > 0) {
+      const constraintsText = context.healthConstraints.map((c: any) => `${c.category} (${c.severity})`).join(', ');
+      contextPrefix += ` [Active Health Constraints: ${constraintsText}]`;
     }
 
     if (contextPrefix) {

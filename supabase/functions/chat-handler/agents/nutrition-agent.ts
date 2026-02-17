@@ -521,7 +521,7 @@ export class NutritionAgent {
     
     **INPUT**:
     Items: ${itemsToAnalyze.map((x: any) => `"${x.item}" (User portion: "${x.portion}")`).join(', ')}
-    Original Context: "${originalContext}" (Use this to find implied items like "with milk" or specific details)
+    Original Context: "${originalContext}"
     
     **USER PROFILE**:
     Health Constraints: ${JSON.stringify(healthConstraints.map((c: any) => c.category))}
@@ -530,16 +530,25 @@ export class NutritionAgent {
     **TASKS**:
     1. **Normalize**: Convert vague names to standard ones (e.g. "egg" -> "Large Egg").
     2. **Estimate**: Calculate nutrition for the *SPECIFIC* user portion.
+       - **CRITICAL**: If the user specified a count (e.g. "2 eggs"), your \`serving_size\` string MUST reflect that count (e.g. "2 large eggs", NOT "1 serving").
+       - If the user specified a weight, use it.
        - Use specific visual estimates if portion is vague (e.g. "bowl" -> ~400g).
-    3. **Missing Items**: Did the user mention items in the context that aren't in the list? Add them.
-    4. **Safety**: Flag CRITICAL health conflicts (e.g. peanut allergy).
+    3. **Tracked Nutrients**:
+       - For EVERY nutrient listed in 'Tracked Nutrients' above (e.g., 'selenium_mcg', 'vitamin_k_mcg'), you MUST estimate a value and include it in the output.
+       - Do not omit them. If negligible, put 0.
+    4. **Missing Items**: 
+       - If the item is a dry powder (e.g. "protein powder", "collagen", "pre-workout") and NO liquid (water, milk, almond milk) is mentioned in the input or context:
+         - Set \`is_missing_item: true\`.
+         - Do NOT invent a liquid; just flag it so we can ask the user.
+       - Did the user mention items in the context that aren't in the list? Add them as new results.
+    5. **Safety**: Flag CRITICAL health conflicts (e.g. peanut allergy).
     
     **OUTPUT JSON**:
     {
       "results": [
         {
           "food_name": string, // Standardized name
-          "serving_size": string, // The portion you calculated for (e.g. "1 large egg" or "100g")
+          "serving_size": string,
           "calories": number,
           "protein_g": number,
           "carbs_g": number,
@@ -548,9 +557,10 @@ export class NutritionAgent {
           "fiber_g": number,
           "sodium_mg": number,
           "hydration_ml": number, // Estimated water content
+          // ... INCLUDE ALL TRACKED NUTRIENTS HERE (e.g. "vitamin_c_mg": 12, "selenium_mcg": 5)
           "confidence": "high" | "medium" | "low",
-          "health_flags": string[], // ["Contains Peanuts", "High Sodium", etc.] - ONLY if relevant to constraints
-          "is_missing_item": boolean // True if this was found in context but not in input list
+          "health_flags": string[], 
+          "is_missing_item": boolean
         }
       ]
     }

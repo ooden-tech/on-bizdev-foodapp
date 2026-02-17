@@ -4,63 +4,19 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 
-// Nutrient Definitions (copied from mobile/src/constants/nutrients.js)
-const MASTER_NUTRIENT_LIST = [
-  // General
-  { key: "calories", name: "Calories", unit: "kcal" },
-  { key: "water_g", name: "Water", unit: "g" },
-  // Macronutrients
-  { key: "protein_g", name: "Protein", unit: "g" },
-  { key: "fat_total_g", name: "Total Fat", unit: "g" },
-  { key: "carbs_g", name: "Carbohydrates", unit: "g" },
-  // Fat Subtypes
-  { key: "fat_saturated_g", name: "Saturated Fat", unit: "g" },
-  { key: "fat_polyunsaturated_g", name: "Polyunsaturated Fat", unit: "g" },
-  { key: "fat_monounsaturated_g", name: "Monounsaturated Fat", unit: "g" },
-  { key: "fat_trans_g", name: "Trans Fat", unit: "g" },
-  { key: "omega_3_g", name: "Omega-3 Fatty Acids", unit: "g" },
-  { key: "omega_6_g", name: "Omega-6 Fatty Acids", unit: "g" },
-  // Carb Subtypes
-  { key: "fiber_g", name: "Dietary Fiber", unit: "g" },
-  { key: "fiber_soluble_g", name: "Soluble Fiber", unit: "g" },
-  { key: "sugar_g", name: "Total Sugars", unit: "g" },
-  { key: "sugar_added_g", name: "Added Sugars", unit: "g" },
-  // Sterols
-  { key: "cholesterol_mg", name: "Cholesterol", unit: "mg" },
-  // Minerals
-  { key: "sodium_mg", name: "Sodium", unit: "mg" },
-  { key: "potassium_mg", name: "Potassium", unit: "mg" },
-  { key: "calcium_mg", name: "Calcium", unit: "mg" },
-  { key: "iron_mg", name: "Iron", unit: "mg" },
-  { key: "magnesium_mg", name: "Magnesium", unit: "mg" },
-  { key: "phosphorus_mg", name: "Phosphorus", unit: "mg" },
-  { key: "zinc_mg", name: "Zinc", unit: "mg" },
-  { key: "copper_mg", name: "Copper", unit: "mg" },
-  { key: "manganese_mg", name: "Manganese", unit: "mg" },
-  { key: "selenium_mcg", name: "Selenium", unit: "mcg" },
-  // Vitamins (Fat-Soluble)
-  { key: "vitamin_a_mcg_rae", name: "Vitamin A", unit: "mcg RAE" },
-  { key: "vitamin_d_mcg", name: "Vitamin D", unit: "mcg" },
-  { key: "vitamin_e_mg", name: "Vitamin E", unit: "mg" },
-  { key: "vitamin_k_mcg", name: "Vitamin K", unit: "mcg" },
-  // Vitamins (Water-Soluble)
-  { key: "vitamin_c_mg", name: "Vitamin C", unit: "mg" },
-  { key: "thiamin_mg", name: "Thiamin (B1)", unit: "mg" },
-  { key: "riboflavin_mg", name: "Riboflavin (B2)", unit: "mg" },
-  { key: "niacin_mg", name: "Niacin (B3)", unit: "mg" },
-  { key: "pantothenic_acid_mg", name: "Pantothenic Acid (B5)", unit: "mg" },
-  { key: "vitamin_b6_mg", name: "Vitamin B6", unit: "mg" },
-  { key: "biotin_mcg", name: "Biotin (B7)", unit: "mcg" },
-  { key: "folate_mcg_dfe", name: "Folate (B9)", unit: "mcg DFE" },
-  { key: "vitamin_b12_mcg", name: "Vitamin B12", unit: "mcg" },
-  // Calculated/Ratio Goals
-  { key: "omega_ratio", name: "Omega 6:3 Ratio", unit: "ratio" },
-];
+// Nutrient Definitions (imported from shared)
+import { MASTER_NUTRIENT_MAP } from 'shared';
+
+const MASTER_NUTRIENT_LIST = Object.entries(MASTER_NUTRIENT_MAP).map(([key, info]) => ({
+  key,
+  name: info.name,
+  unit: info.unit
+}));
 
 interface TrackedGoalState {
-    tracked: boolean;
-    target: string; // Store target as string for input field
-    goalType: 'goal' | 'limit'; // Add goal type
+  tracked: boolean;
+  target: string; // Store target as string for input field
+  goalType: 'goal' | 'limit'; // Add goal type
 }
 
 export default function GoalSettingsPage() {
@@ -93,17 +49,17 @@ export default function GoalSettingsPage() {
         .from('user_goals')
         .select('nutrient, target_value, goal_type')
         .eq('user_id', user.id);
-      
+
       if (fetchError) throw fetchError;
 
       const initialGoalsState: Record<string, TrackedGoalState> = {};
       MASTER_NUTRIENT_LIST.forEach(nutrient => {
-          const existingGoal = data?.find(goal => goal.nutrient === nutrient.key);
-          initialGoalsState[nutrient.key] = {
-              tracked: !!existingGoal,
-              target: existingGoal?.target_value?.toString() || '',
-              goalType: existingGoal?.goal_type === 'limit' ? 'limit' : 'goal',
-          };
+        const existingGoal = data?.find(goal => goal.nutrient === nutrient.key);
+        initialGoalsState[nutrient.key] = {
+          tracked: !!existingGoal,
+          target: existingGoal?.target_value?.toString() || '',
+          goalType: existingGoal?.goal_type === 'limit' ? 'limit' : 'goal',
+        };
       });
       setTrackedGoals(initialGoalsState);
       setInitialGoals(JSON.parse(JSON.stringify(initialGoalsState))); // Deep copy for initial state
@@ -121,11 +77,11 @@ export default function GoalSettingsPage() {
 
   // Fetch on mount or auth change
   useEffect(() => {
-     if (!authLoading && user) {
-        fetchGoals();
-     } else if (!authLoading && !user) {
-         setLoading(false); // Not loading if not logged in
-     }
+    if (!authLoading && user) {
+      fetchGoals();
+    } else if (!authLoading && !user) {
+      setLoading(false); // Not loading if not logged in
+    }
   }, [authLoading, user, fetchGoals]);
 
   // --- Effect to detect unsaved changes ---
@@ -133,10 +89,10 @@ export default function GoalSettingsPage() {
     // Compare current trackedGoals with initialGoals
     // Ensure initialGoals is not empty before comparing
     if (Object.keys(initialGoals).length > 0) {
-        const changed = JSON.stringify(trackedGoals) !== JSON.stringify(initialGoals);
-        if (isMounted.current) { // Only update state if mounted
-            setHasUnsavedChanges(changed);
-        }
+      const changed = JSON.stringify(trackedGoals) !== JSON.stringify(initialGoals);
+      if (isMounted.current) { // Only update state if mounted
+        setHasUnsavedChanges(changed);
+      }
     }
   }, [trackedGoals, initialGoals]);
 
@@ -192,20 +148,20 @@ export default function GoalSettingsPage() {
   const handleTargetChange = (key: string, value: string) => {
     setError(null);
     setSuccessMessage(null);
-     // Reset unsaved changes status handled by the useEffect hook watching trackedGoals
+    // Reset unsaved changes status handled by the useEffect hook watching trackedGoals
     if (value === '' || /^\d*\.?\d*$/.test(value)) {
-         setTrackedGoals(prev => {
-             const currentGoal = prev[key] || { tracked: false, target: '', goalType: 'goal' };
-             return {
-                 ...prev,
-                 [key]: {
-                     ...currentGoal,
-                     tracked: true, // Setting a target implies tracking
-                     target: value,
-                     // Keep existing goalType when target changes
-                 },
-             };
-         });
+      setTrackedGoals(prev => {
+        const currentGoal = prev[key] || { tracked: false, target: '', goalType: 'goal' };
+        return {
+          ...prev,
+          [key]: {
+            ...currentGoal,
+            tracked: true, // Setting a target implies tracking
+            target: value,
+            // Keep existing goalType when target changes
+          },
+        };
+      });
     }
   };
 
@@ -213,24 +169,24 @@ export default function GoalSettingsPage() {
   const handleGoalTypeChange = (key: string, value: 'goal' | 'limit') => {
     setError(null);
     setSuccessMessage(null);
-     // Reset unsaved changes status handled by the useEffect hook watching trackedGoals
+    // Reset unsaved changes status handled by the useEffect hook watching trackedGoals
     setTrackedGoals(prev => {
-        const currentGoal = prev[key] || { tracked: true, target: '', goalType: 'goal' }; // Assume tracked if changing type
-        return {
-            ...prev,
-            [key]: {
-                ...currentGoal,
-                tracked: true, // Ensure tracked is true
-                goalType: value,
-            }
+      const currentGoal = prev[key] || { tracked: true, target: '', goalType: 'goal' }; // Assume tracked if changing type
+      return {
+        ...prev,
+        [key]: {
+          ...currentGoal,
+          tracked: true, // Ensure tracked is true
+          goalType: value,
         }
+      }
     });
   };
 
   const handleSaveGoals = async () => {
     if (!user || !supabase) {
-        setError("Cannot save goals: Not authenticated.");
-        return;
+      setError("Cannot save goals: Not authenticated.");
+      return;
     }
 
     setSaving(true);
@@ -247,92 +203,92 @@ export default function GoalSettingsPage() {
       if (currentGoalState?.tracked) {
         const targetStr = currentGoalState.target;
         if (targetStr === '' || targetStr === null || targetStr === undefined) {
-            validationError = `Target value is required for tracked nutrient: ${nutrient.name}.`;
-            break;
+          validationError = `Target value is required for tracked nutrient: ${nutrient.name}.`;
+          break;
         }
         const targetValue = parseFloat(targetStr);
         if (isNaN(targetValue) || targetValue < 0) {
-            validationError = `Invalid target value for ${nutrient.name}: must be a non-negative number.`;
-            break;
+          validationError = `Invalid target value for ${nutrient.name}: must be a non-negative number.`;
+          break;
         }
         // Ensure user_id, nutrient, target_value, unit, goal_type are included
         goalsToSave.push({
-            user_id: user.id,
-            nutrient: key,
-            target_value: targetValue,
-            unit: nutrient.unit,
-            goal_type: currentGoalState.goalType || 'goal'
+          user_id: user.id,
+          nutrient: key,
+          target_value: targetValue,
+          unit: nutrient.unit,
+          goal_type: currentGoalState.goalType || 'goal'
         });
       }
     }
 
     if (validationError) {
-        setError(validationError);
-        setSaving(false);
-        return;
+      setError(validationError);
+      setSaving(false);
+      return;
     }
 
     // --- Refactored Saving Logic using Upsert ---
     try {
-        if (goalsToSave.length > 0) {
-             // If there are goals to save, upsert them
-             console.log("Upserting goals:", goalsToSave);
-             const { data, error: upsertError } = await supabase
-                 .from('user_goals')
-                 .upsert(goalsToSave, {
-                     onConflict: 'user_id, nutrient' // Specify conflict target
-                 })
-                 .select(); // Optionally select to confirm/log results
+      if (goalsToSave.length > 0) {
+        // If there are goals to save, upsert them
+        console.log("Upserting goals:", goalsToSave);
+        const { data, error: upsertError } = await supabase
+          .from('user_goals')
+          .upsert(goalsToSave, {
+            onConflict: 'user_id, nutrient' // Specify conflict target
+          })
+          .select(); // Optionally select to confirm/log results
 
-             if (upsertError) {
-                 throw upsertError;
-             }
-             console.log("Goals upserted successfully:", data);
+        if (upsertError) {
+          throw upsertError;
         }
-        // Removed the 'else' block that deleted all goals if goalsToSave was empty
-        // This was potentially dangerous. Deletion is now handled separately.
+        console.log("Goals upserted successfully:", data);
+      }
+      // Removed the 'else' block that deleted all goals if goalsToSave was empty
+      // This was potentially dangerous. Deletion is now handled separately.
 
-        // --- Add Deletion Logic ---
-        // Determine which nutrients were previously tracked but are now untracked
-        const previouslyTrackedKeys = Object.keys(initialGoals).filter(key => initialGoals[key]?.tracked);
-        const currentlyTrackedKeys = Object.keys(trackedGoals).filter(key => trackedGoals[key]?.tracked);
-        const keysToDelete = previouslyTrackedKeys.filter(key => !currentlyTrackedKeys.includes(key));
+      // --- Add Deletion Logic ---
+      // Determine which nutrients were previously tracked but are now untracked
+      const previouslyTrackedKeys = Object.keys(initialGoals).filter(key => initialGoals[key]?.tracked);
+      const currentlyTrackedKeys = Object.keys(trackedGoals).filter(key => trackedGoals[key]?.tracked);
+      const keysToDelete = previouslyTrackedKeys.filter(key => !currentlyTrackedKeys.includes(key));
 
-        if (keysToDelete.length > 0) {
-            console.log("Deleting untracked goals for nutrients:", keysToDelete);
-            const { error: deleteError } = await supabase
-                .from('user_goals')
-                .delete()
-                .eq('user_id', user.id)
-                .in('nutrient', keysToDelete);
+      if (keysToDelete.length > 0) {
+        console.log("Deleting untracked goals for nutrients:", keysToDelete);
+        const { error: deleteError } = await supabase
+          .from('user_goals')
+          .delete()
+          .eq('user_id', user.id)
+          .in('nutrient', keysToDelete);
 
-            if (deleteError) {
-                // Log the error but potentially allow the success message if upsert worked
-                console.error("Error deleting untracked goals:", deleteError);
-                setError(`Goals saved, but failed to remove untracked goals: ${deleteError.message}`);
-                // Don't throw here, let the success message show if upsert was ok
-            } else {
-                 console.log("Untracked goals deleted successfully.");
-            }
+        if (deleteError) {
+          // Log the error but potentially allow the success message if upsert worked
+          console.error("Error deleting untracked goals:", deleteError);
+          setError(`Goals saved, but failed to remove untracked goals: ${deleteError.message}`);
+          // Don't throw here, let the success message show if upsert was ok
+        } else {
+          console.log("Untracked goals deleted successfully.");
         }
-        // --- End Deletion Logic ---
+      }
+      // --- End Deletion Logic ---
 
-        setSuccessMessage("Goals saved successfully!");
-        // IMPORTANT: Reset initial state to current state after successful save
-        if (isMounted.current) { // Check if mounted before setting state
-            setInitialGoals(JSON.parse(JSON.stringify(trackedGoals)));
-            setHasUnsavedChanges(false); // Explicitly set false after save
-        }
+      setSuccessMessage("Goals saved successfully!");
+      // IMPORTANT: Reset initial state to current state after successful save
+      if (isMounted.current) { // Check if mounted before setting state
+        setInitialGoals(JSON.parse(JSON.stringify(trackedGoals)));
+        setHasUnsavedChanges(false); // Explicitly set false after save
+      }
 
     } catch (err: unknown) {
-       console.error("Error saving goals:", err);
-       const errorMessage = err instanceof Error ? err.message : String(err);
-       setError(`Failed to save goals: ${errorMessage}`);
-       setSuccessMessage(null); // Clear success message on error
+      console.error("Error saving goals:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(`Failed to save goals: ${errorMessage}`);
+      setSuccessMessage(null); // Clear success message on error
     } finally {
-        if (isMounted.current) { // Check if mounted before setting state
-            setSaving(false);
-        }
+      if (isMounted.current) { // Check if mounted before setting state
+        setSaving(false);
+      }
     }
   };
 
@@ -347,7 +303,7 @@ export default function GoalSettingsPage() {
   }
 
   if (!user) {
-     return (
+    return (
       <div className="flex h-screen items-center justify-center">
         <p>Please log in to set nutrient goals.</p>
       </div>
@@ -358,28 +314,28 @@ export default function GoalSettingsPage() {
     <div className="flex h-screen bg-gray-50 relative overflow-hidden">
       {/* Sidebar navigation */}
       <div className={`sidebar fixed top-0 left-0 h-full w-64 bg-white shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-800">NutriPal</h2>
-            <button onClick={() => setMenuOpen(false)} className="p-2 rounded-md text-gray-600 hover:bg-gray-100">
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-             </button>
-         </div>
-         {/* Navigation Links - Settings Active */}
-         <nav className="flex-1 p-4 space-y-1">
-           <Link href="/dashboard" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Dashboard</Link>
-           <Link href="/profile" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Profile</Link>
-           <Link href="/analytics" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Analytics</Link>
-           <Link href="/recipes" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Saved Recipes</Link>
-           <Link href="/chat" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Chat</Link>
-           <Link href="/settings" className="block px-3 py-2 bg-blue-50 text-blue-700 rounded-md font-medium">Settings</Link> {/* Active Parent */}
-         </nav>
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <h2 className="text-xl font-semibold text-gray-800">NutriPal</h2>
+          <button onClick={() => setMenuOpen(false)} className="p-2 rounded-md text-gray-600 hover:bg-gray-100">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        {/* Navigation Links - Settings Active */}
+        <nav className="flex-1 p-4 space-y-1">
+          <Link href="/dashboard" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Dashboard</Link>
+          <Link href="/profile" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Profile</Link>
+          <Link href="/analytics" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Analytics</Link>
+          <Link href="/recipes" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Saved Recipes</Link>
+          <Link href="/chat" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Chat</Link>
+          <Link href="/settings" className="block px-3 py-2 bg-blue-50 text-blue-700 rounded-md font-medium">Settings</Link> {/* Active Parent */}
+        </nav>
       </div>
 
-      {/* Main content area */} 
+      {/* Main content area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header with Hamburger */}
         <header className="bg-white border-b border-gray-200 p-4 z-10 flex-shrink-0">
-           <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <button className="menu-button p-2 rounded-md text-gray-600 hover:bg-gray-100" onClick={() => setMenuOpen(true)}>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
@@ -388,97 +344,96 @@ export default function GoalSettingsPage() {
           </div>
         </header>
 
-        {/* Goal Settings Content */} 
+        {/* Goal Settings Content */}
         <main className="flex-1 overflow-y-auto p-6">
-           <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow border border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">Manage Nutrient Tracking</h2>
-                <p className="text-sm text-gray-600 mb-6">Select the nutrients you want to track and set your daily targets. Targets can be a 'Goal' (minimum) or a 'Limit' (maximum).</p>
+          <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow border border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">Manage Nutrient Tracking</h2>
+            <p className="text-sm text-gray-600 mb-6">Select the nutrients you want to track and set your daily targets. Targets can be a 'Goal' (minimum) or a 'Limit' (maximum).</p>
 
-                {/* Feedback Messages */}
-                {error && (
-                   <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md border border-red-300">
-                       {error}
-                   </div>
-                 )}
-                 {successMessage && (
-                   <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md border border-green-300">
-                       {successMessage}
-                   </div>
-                 )}
+            {/* Feedback Messages */}
+            {error && (
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md border border-red-300">
+                {error}
+              </div>
+            )}
+            {successMessage && (
+              <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md border border-green-300">
+                {successMessage}
+              </div>
+            )}
 
-                {/* Nutrient List */} 
-                <div className="space-y-4">
-                    {MASTER_NUTRIENT_LIST.map((nutrient) => {
-                        const key = nutrient.key;
-                        const goalState = trackedGoals[key] || { tracked: false, target: '', goalType: 'goal' };
-                        return (
-                            <div key={key} className="p-4 border rounded-md flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 hover:bg-gray-50 transition-colors">
-                                <div className="flex items-center flex-grow">
-                                    <input 
-                                        type="checkbox"
-                                        id={`track-${key}`}
-                                        checked={goalState.tracked}
-                                        onChange={() => handleToggleTracked(key)}
-                                        className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-3"
-                                    />
-                                    <label htmlFor={`track-${key}`} className="text-sm font-medium text-gray-900">
-                                        {nutrient.name}
-                                    </label>
-                                </div>
-                                
-                                <div className="flex items-center gap-2 w-full sm:w-auto flex-shrink-0"> 
-                                    {goalState.tracked ? (
-                                        <>
-                                            <select
-                                                id={`goalType-${key}`}
-                                                value={goalState.goalType}
-                                                onChange={(e) => handleGoalTypeChange(key, e.target.value as 'goal' | 'limit')}
-                                                className="h-9 block w-24 py-1.5 px-2 border border-gray-300 bg-white rounded-md shadow-sm text-sm text-black focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                            >
-                                                <option value="goal">Goal</option>
-                                                <option value="limit">Limit</option>
-                                            </select>
-                                            <input 
-                                                type="text" 
-                                                id={`target-${key}`}
-                                                value={goalState.target}
-                                                onChange={(e) => handleTargetChange(key, e.target.value)}
-                                                placeholder={`Target`}
-                                                className="h-9 block w-28 py-1.5 px-3 border border-gray-300 rounded-md shadow-sm text-sm text-black placeholder-black focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                                inputMode="decimal"
-                                            />
-                                            <span className="text-sm text-gray-500 w-12 text-left">{nutrient.unit}</span>
-                                        </>
-                                    ) : (
-                                        <div className="h-9 w-full"></div>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* Sticky Save Button Area */}
-                 <div className="sticky bottom-0 left-0 right-0 bg-white bg-opacity-90 backdrop-blur-sm p-4 border-t border-gray-200 shadow-top z-10">
-                    <div className="max-w-6xl mx-auto flex items-center justify-end space-x-4">
-                        {error && <p className="text-red-600 text-sm mr-auto">{error}</p>} {/* Push error left */}
-                        {successMessage && <p className="text-green-600 text-sm mr-auto">{successMessage}</p>} {/* Push success left */}
-                         {/* Add a visual indicator for unsaved changes */}
-                         {hasUnsavedChanges && !saving && <p className="text-yellow-600 text-sm font-medium">Unsaved changes</p>}
-                        <button
-                           onClick={handleSaveGoals}
-                           disabled={saving || !hasUnsavedChanges} // Disable if saving or no changes
-                           className={`px-6 py-2 rounded-md text-white font-semibold transition-colors ${
-                               saving || !hasUnsavedChanges
-                               ? 'bg-gray-400 cursor-not-allowed'
-                               : 'bg-blue-600 hover:bg-blue-700'
-                           }`}
-                       >
-                           {saving ? 'Saving...' : 'Save Goals'}
-                       </button>
+            {/* Nutrient List */}
+            <div className="space-y-4">
+              {MASTER_NUTRIENT_LIST.map((nutrient) => {
+                const key = nutrient.key;
+                const goalState = trackedGoals[key] || { tracked: false, target: '', goalType: 'goal' };
+                return (
+                  <div key={key} className="p-4 border rounded-md flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 hover:bg-gray-50 transition-colors">
+                    <div className="flex items-center flex-grow">
+                      <input
+                        type="checkbox"
+                        id={`track-${key}`}
+                        checked={goalState.tracked}
+                        onChange={() => handleToggleTracked(key)}
+                        className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-3"
+                      />
+                      <label htmlFor={`track-${key}`} className="text-sm font-medium text-gray-900">
+                        {nutrient.name}
+                      </label>
                     </div>
-                </div>
-           </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto flex-shrink-0">
+                      {goalState.tracked ? (
+                        <>
+                          <select
+                            id={`goalType-${key}`}
+                            value={goalState.goalType}
+                            onChange={(e) => handleGoalTypeChange(key, e.target.value as 'goal' | 'limit')}
+                            className="h-9 block w-24 py-1.5 px-2 border border-gray-300 bg-white rounded-md shadow-sm text-sm text-black focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="goal">Goal</option>
+                            <option value="limit">Limit</option>
+                          </select>
+                          <input
+                            type="text"
+                            id={`target-${key}`}
+                            value={goalState.target}
+                            onChange={(e) => handleTargetChange(key, e.target.value)}
+                            placeholder={`Target`}
+                            className="h-9 block w-28 py-1.5 px-3 border border-gray-300 rounded-md shadow-sm text-sm text-black placeholder-black focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            inputMode="decimal"
+                          />
+                          <span className="text-sm text-gray-500 w-12 text-left">{nutrient.unit}</span>
+                        </>
+                      ) : (
+                        <div className="h-9 w-full"></div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Sticky Save Button Area */}
+            <div className="sticky bottom-0 left-0 right-0 bg-white bg-opacity-90 backdrop-blur-sm p-4 border-t border-gray-200 shadow-top z-10">
+              <div className="max-w-6xl mx-auto flex items-center justify-end space-x-4">
+                {error && <p className="text-red-600 text-sm mr-auto">{error}</p>} {/* Push error left */}
+                {successMessage && <p className="text-green-600 text-sm mr-auto">{successMessage}</p>} {/* Push success left */}
+                {/* Add a visual indicator for unsaved changes */}
+                {hasUnsavedChanges && !saving && <p className="text-yellow-600 text-sm font-medium">Unsaved changes</p>}
+                <button
+                  onClick={handleSaveGoals}
+                  disabled={saving || !hasUnsavedChanges} // Disable if saving or no changes
+                  className={`px-6 py-2 rounded-md text-white font-semibold transition-colors ${saving || !hasUnsavedChanges
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                >
+                  {saving ? 'Saving...' : 'Save Goals'}
+                </button>
+              </div>
+            </div>
+          </div>
         </main>
       </div>
     </div>

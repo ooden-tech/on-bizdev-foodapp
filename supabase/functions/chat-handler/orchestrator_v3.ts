@@ -443,6 +443,12 @@ function decorateWithContext(message: string, pendingAction: any): string {
       };
     }
 
+    if (intent === 'log_food' && !activeProposal) {
+      console.warn('[OrchestratorV3] WARNING: Intent is log_food but NO active proposal generated!');
+    } else if (activeProposal) {
+      console.log(`[OrchestratorV3] Active Proposal Generated: ${activeProposal.type} (ID: ${activeProposal.id})`);
+    }
+
     if (activeProposal) {
       if (reasoningResult.proposal) {
         // Only save to DB if it's a NEW proposal from this turn

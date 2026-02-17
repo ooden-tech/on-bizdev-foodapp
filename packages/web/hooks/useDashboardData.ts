@@ -31,32 +31,9 @@ interface DailyAdjustments {
   [nutrientKey: string]: number | undefined;
 }
 
-// Helper function to normalize nutrient keys (e.g., "Protein (g)" -> "protein_g")
-const normalizeNutrientKey = (key: string): string => {
-  const k = key.toLowerCase().trim();
-  if (k === 'calories' || k === 'kcal' || k === 'energy') return 'calories';
-  if (k.includes('protein')) return 'protein_g';
-  if (k.includes('carb')) return 'carbs_g';
-  if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
-  if (k.includes('fat')) return 'fat_total_g';
-  if (k.includes('fiber')) return 'fiber_g';
-  if (k.includes('sugar')) return 'sugar_g';
-  if (k.includes('sodium')) return 'sodium_mg';
-  if (k.includes('potassium')) return 'potassium_mg';
-  if (k.includes('cholesterol')) return 'cholesterol_mg';
-  if (k.includes('calcium')) return 'calcium_mg';
-  if (k.includes('iron')) return 'iron_mg';
-  if (k.includes('magnesium')) return 'magnesium_mg';
-  if (k.includes('vit') && k.includes('a')) return 'vitamin_a_mcg';
-  if (k.includes('vit') && k.includes('c')) return 'vitamin_c_mg';
-  if (k.includes('vit') && k.includes('d')) return 'vitamin_d_mcg';
-
-  return key.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-};
-
-const formatDate = (date: Date): string => {
-  return date.toISOString().split('T')[0];
-};
+// Helper to normalize nutrient keys (e.g., "Protein (g)" -> "protein_g")
+// Helper to normalize nutrient keys (e.g., "Protein (g)" -> "protein_g")
+import { normalizeNutrientKey, MASTER_NUTRIENT_MAP } from 'shared';
 
 export const useDashboardData = () => {
   const { user, supabase, loading: authLoading } = useAuth();
@@ -109,15 +86,48 @@ export const useDashboardData = () => {
       const fetchedLogs = logsResponse.data || [];
 
       // Deduplicate goals by normalized key
+      // STRICT FILTERING: Only allow keys present in MASTER_NUTRIENT_MAP
       const uniqueGoalsMap = new Map<string, UserGoal>();
+
       fetchedGoals.forEach(g => {
         const normalized = normalizeNutrientKey(g.nutrient);
-        const existing = uniqueGoalsMap.get(normalized);
-        // Keep the one with the highest target or first seen
-        if (!existing || g.target_value > existing.target_value) {
-          uniqueGoalsMap.set(normalized, { ...g, nutrient: normalized });
+
+        // Strict Check: Is this a valid technical key?
+        if (!MASTER_NUTRIENT_MAP[normalized]) {
+          console.warn(`[useDashboardData] Ignoring invalid/legacy nutrient goal: ${g.nutrient} -> ${normalized}`);
+          return;
         }
+
+        const existing = uniqueGoalsMap.get(normalized);
+
+        // Priority Logic:
+        // 1. If we have a goal that EXACTLY matches the normalized key (technical key), prefer it.
+        // 2. Otherwise, valid alias is okay.
+        // 3. If duplicate technical keys (unlikely in DB constraint but possible), take latest or max. 
+        //    Here we assume if existing is NOT exact technical match, but new IS, take new.
+
+        const isNewExact = g.nutrient === normalized;
+        const isExistingExact = existing ? existing.nutrient === normalized : false;
+
+        if (!existing) {
+          uniqueGoalsMap.set(normalized, { ...g, nutrient: normalized });
+        } else if (isNewExact && !isExistingExact) {
+          // New one is the "Real" key, replace the "alias" entry
+          uniqueGoalsMap.set(normalized, { ...g, nutrient: normalized });
+        } else if (isNewExact && isExistingExact) {
+          // Both are "Real" keys? Take max target.
+          if (g.target_value > existing.target_value) {
+            uniqueGoalsMap.set(normalized, { ...g, nutrient: normalized });
+          }
+        } else if (!isNewExact && !isExistingExact) {
+          // Both are aliases? Take max.
+          if (g.target_value > existing.target_value) {
+            uniqueGoalsMap.set(normalized, { ...g, nutrient: normalized });
+          }
+        }
+        // implicit else: New is alias, Existing is Real -> Keep Existing.
       });
+
       const finalGoals = Array.from(uniqueGoalsMap.values());
 
       const totals: DailyTotals = {};
@@ -125,7 +135,10 @@ export const useDashboardData = () => {
         Object.keys(log).forEach(key => {
           if (typeof log[key] === 'number') {
             const normalizedKey = normalizeNutrientKey(key);
-            totals[normalizedKey] = (totals[normalizedKey] || 0) + (log[key] as number);
+            // Only sum up if valid nutrient
+            if (MASTER_NUTRIENT_MAP[normalizedKey] || normalizedKey === 'calories') {
+              totals[normalizedKey] = (totals[normalizedKey] || 0) + (log[key] as number);
+            }
           }
         });
       });
@@ -137,7 +150,9 @@ export const useDashboardData = () => {
       const adjs: DailyAdjustments = {};
       fetchedAdjs.forEach(adj => {
         const normalized = normalizeNutrientKey(adj.nutrient);
-        adjs[normalized] = (adjs[normalized] || 0) + (adj.adjustment_value as number);
+        if (MASTER_NUTRIENT_MAP[normalized] || normalized === 'calories') {
+          adjs[normalized] = (adjs[normalized] || 0) + (adj.adjustment_value as number);
+        }
       });
       setDailyAdjustments(adjs);
 

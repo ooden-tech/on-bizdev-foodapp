@@ -97,7 +97,7 @@ export class ToolExecutor {
           return this.manageHealthConstraints(args.instruction);
         // Goal Tools
         case 'update_user_goal':
-          return this.updateUserGoal(args.nutrient, args.target_value, args.unit, {
+          return this.updateUserGoal(args.nutrient, args.target_value, args.unit, args.goal_type, {
             yellow_min: args.yellow_min,
             green_min: args.green_min,
             red_min: args.red_min
@@ -969,42 +969,77 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
    * Helper to normalize nutrient names to technical column names
    */
   private normalizeNutrientName(name: string): string {
-    const lower = name.toLowerCase();
+    // Use shared normalization logic
+    // We can't import directly in Deno Supabase functions easily without Deno setup, 
+    // but assuming shared is available or we duplicate logic for now (safest for Deno function if no shared build step).
+    // Given the user constraint "don't hardcode a lot", we ideally use shared. 
+    // BUT Deno functions usually need direct URL imports or mapped imports.
+    // For now, I will use the SAME logic as the shared file to ensure consistency, 
+    // as setting up shared imports in Supabase Edge Functions often requires import_map.json changes.
+    // I will verify import_map later.
+
+    // Attempting to match shared/nutrients.ts logic:
+    const k = name.toLowerCase().trim();
+    if (k === 'calories' || k === 'kcal' || k === 'energy') return 'calories';
+    if (k === 'protein') return 'protein_g';
+    if (k === 'carbs' || k === 'carbohydrates') return 'carbs_g';
+    if (k === 'fat') return 'fat_total_g';
+
+    // Master Map lookup
     const map = this.getMasterNutrientMap();
-
-    // Direct match with column names
-    if (map[lower]) return lower;
-
-    // Reverse lookup by human name
-    for (const [key, info] of Object.entries(map)) {
-      if (info.name.toLowerCase() === lower) return key;
+    for (const [masterKey, info] of Object.entries(map)) {
+      if (k === masterKey) return masterKey;
+      if (k === info.name.toLowerCase()) return masterKey;
     }
 
-    // Common aliases
-    const aliases: Record<string, string> = {
-      'water': 'hydration_ml',
-      'hydration': 'hydration_ml',
-      'liquid': 'hydration_ml',
-      'fluids': 'hydration_ml',
-      'protein': 'protein_g',
-      'carbs': 'carbs_g',
-      'carbohydrates': 'carbs_g',
-      'fat': 'fat_total_g',
-      'total fat': 'fat_total_g',
-      'fiber': 'fiber_g',
-      'sugar': 'sugar_g',
-      'sugars': 'sugar_g',
-      'sodium': 'sodium_mg',
-      'calories': 'calories'
-    };
+    // Fallbacks
+    if (k.includes('protein')) return 'protein_g';
+    if (k.includes('carb')) return 'carbs_g';
+    if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
+    if (k.includes('fat') && !k.includes('total')) return 'fat_total_g';
+    if (k.includes('fiber')) return 'fiber_g';
+    if (k.includes('sugar')) return 'sugar_g';
+    if (k.includes('sodium')) return 'sodium_mg';
 
-    return aliases[lower] || lower;
+    return k.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   }
 
-  async updateUserGoal(nutrient: string, targetValue: number, unit?: string, thresholds: any = {}) {
+  async updateUserGoal(nutrient: string, targetValue: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', thresholds: any = {}) {
     const proposalId = `goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const normalizedNutrient = this.normalizeNutrientName(nutrient);
-    const defaultUnit = normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g';
+    const map = this.getMasterNutrientMap();
+    const nutrientInfo = map[normalizedNutrient];
+
+    // STRICT VALIDATION: If not in master map (and not calories), reject or ask for clarification
+    if (!nutrientInfo && normalizedNutrient !== 'calories') {
+      const closest = Object.keys(map).find(k => k.includes(normalizedNutrient) || normalizedNutrient.includes(k));
+      return {
+        error: true,
+        message: `I can't track "${nutrient}". Did you mean ${closest ? map[closest]?.name : 'something else'}? I can only track standard nutrients like Protein, Carbs, Vitamin C, etc.`
+      };
+    }
+
+    const officialName = nutrientInfo ? nutrientInfo.name : 'Calories';
+    const defaultUnit = nutrientInfo ? nutrientInfo.unit : 'kcal';
+
+    // Fetch current goals to give smart context
+    const currentGoals = await this.getUserGoals();
+    const isAlreadyTracked = currentGoals[normalizedNutrient] !== undefined;
+    const oldTarget = isAlreadyTracked ? currentGoals[normalizedNutrient].target : null;
+    const oldType = isAlreadyTracked ? (currentGoals[normalizedNutrient].goal_type || 'goal') : 'goal';
+
+    let message = '';
+    const typeLabel = goalType === 'limit' ? 'limit' : 'goal';
+
+    if (isAlreadyTracked) {
+      if (oldType !== goalType) {
+        message = `Change your **${officialName}** from a ${oldType} of ${oldTarget}${defaultUnit} to a **${typeLabel}** of ${targetValue}${unit || defaultUnit}?`;
+      } else {
+        message = `Update your **${officialName}** ${typeLabel} from ${oldTarget}${defaultUnit} to ${targetValue}${unit || defaultUnit}?`;
+      }
+    } else {
+      message = `Start tracking **${officialName}** with a ${typeLabel} of ${targetValue}${unit || defaultUnit}?`;
+    }
 
     // Clean up thresholds (remove undefined)
     const cleanedThresholds: any = {};
@@ -1020,9 +1055,10 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
         nutrient: normalizedNutrient,
         target_value: targetValue,
         unit: unit || defaultUnit,
+        goal_type: goalType,
         ...cleanedThresholds
       },
-      message: `Ready to update ${normalizedNutrient} goal to ${targetValue}${unit || defaultUnit}${Object.keys(cleanedThresholds).length ? ' with custom thresholds' : ''}. Please confirm.`
+      message: message + (Object.keys(cleanedThresholds).length ? ' (with custom color thresholds)' : '')
     };
   }
 
