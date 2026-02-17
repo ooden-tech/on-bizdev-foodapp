@@ -15,6 +15,7 @@ import { ReasoningAgent } from './agents/reasoning-agent.ts';
 import { RecipeAgent } from './agents/recipe-agent.ts';
 import { InsightAgent } from './agents/insight-agent.ts';
 import { scaleNutrition } from './agents/nutrition-agent.ts';
+import { normalizeNutrientKey, MASTER_NUTRIENT_MAP } from '../_shared/nutrient-validation.ts';
 import { createAdminClient } from '../_shared/supabase-client.ts';
 import { DbService } from './services/db-service.ts';
 import { PersistenceService } from './services/persistence-service.ts';
@@ -77,8 +78,11 @@ function decorateWithContext(message: string, pendingAction: any): string {
   const dayClassification = await db.getDayClassification(userId, todayDate);
 
   // Feature 10: Tracked Nutrients from Goals
+  // Feature 10: Tracked Nutrients from Goals
   const userGoals = await db.getUserGoals(userId);
-  const trackedNutrients = userGoals?.map((g: any) => g.nutrient) || [];
+  const trackedNutrients = userGoals
+    ?.map((g: any) => normalizeNutrientKey(g.nutrient))
+    .filter((k: string) => MASTER_NUTRIENT_MAP[k]) || [];
 
   // Feature 4: Unified Pipeline Context
   const userProfile = (await db.getUserProfile(userId))?.data;
@@ -658,27 +662,49 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
           }
         };
       case 'goal_update':
-        await db.updateUserGoal(userId, data.nutrient, data.target_value, data.unit, {
-          yellow_min: data.yellow_min,
-          green_min: data.green_min,
-          red_min: data.red_min
-        });
-        await sessionService.clearPendingAction(userId);
-        return {
-          status: 'success',
-          message: `✅ Updated your ${data.nutrient} goal to ${data.target_value}${data.unit}! 🎯`,
-          response_type: 'goal_updated',
-          data: {
-            goal_updated: data
-          }
-        };
+        if (data.action === 'remove') {
+          await db.removeUserGoal(userId, data.nutrient);
+          await sessionService.clearPendingAction(userId);
+          return {
+            status: 'success',
+            message: `✅ Removed your ${data.nutrient} goal! 🗑️`,
+            response_type: 'goal_updated',
+            data: {
+              goal_updated: { ...data, removed: true }
+            }
+          };
+        } else {
+          await db.updateUserGoal(userId, data.nutrient, data.target_value, data.unit, data.goal_type, {
+            yellow_min: data.yellow_min,
+            green_min: data.green_min,
+            red_min: data.red_min
+          });
+          await sessionService.clearPendingAction(userId);
+          return {
+            status: 'success',
+            message: `✅ Updated your ${data.nutrient} goal to ${data.target_value}${data.unit}${data.goal_type === 'limit' ? ' (Limit)' : ''}! 🎯`,
+            response_type: 'goal_updated',
+            data: {
+              goal_updated: data
+            }
+          };
+        }
 
       case 'bulk_goal_update':
         await db.updateUserGoals(userId, data.goals);
         await sessionService.clearPendingAction(userId);
+
+        // Count adds/removes for message
+        const removedCount = data.goals.filter((g: any) => g.action === 'remove').length;
+        const updatedCount = data.goals.length - removedCount;
+        let msg = `✅ Processed ${data.goals.length} goal updates!`;
+        if (removedCount > 0 && updatedCount > 0) msg = `✅ Updated ${updatedCount} goals and removed ${removedCount}! 🎯`;
+        else if (removedCount > 0) msg = `✅ Removed ${removedCount} goals! 🗑️`;
+        else msg = `✅ Updated ${updatedCount} nutrition goals! 🎯`;
+
         return {
           status: 'success',
-          message: `✅ Updated ${data.goals.length} nutrition goals! 🎯`,
+          message: msg,
           response_type: 'goal_updated',
           data: {
             goals_updated: data.goals

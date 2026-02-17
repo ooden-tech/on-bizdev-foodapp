@@ -78,12 +78,24 @@ export class DbService {
   /**
    * Updates a user's nutritional goal
    */ async updateUserGoal(userId: string, nutrient: string, value: number, unit: string, goalType: 'goal' | 'limit' = 'goal', thresholds: any = {}) {
+    // Sanitize goal_type - safely handle potential non-string inputs
+    let rawType = goalType ? String(goalType) : 'goal';
+    let cleanGoalType = rawType.toLowerCase().trim();
+    if (cleanGoalType !== 'goal' && cleanGoalType !== 'limit') {
+      // Fallback: If it contains "limit" or "max", assume limit. Otherwise goal.
+      if (cleanGoalType.includes('limit') || cleanGoalType.includes('max')) {
+        cleanGoalType = 'limit';
+      } else {
+        cleanGoalType = 'goal';
+      }
+    }
+
     const { error } = await this.supabase.from('user_goals').upsert({
       user_id: userId,
       nutrient: nutrient,
       target_value: value,
       unit: unit,
-      goal_type: goalType,
+      goal_type: cleanGoalType,
       ...thresholds
     }, {
       onConflict: 'user_id, nutrient'
@@ -106,23 +118,94 @@ export class DbService {
     return data;
   }
   /**
-   * Updates multiple user nutritional goals in a single transaction-like call
-   */ async updateUserGoals(userId: string, goals: any[]) {
-    const { error } = await this.supabase.from('user_goals').upsert(goals.map((g: any) => ({
-      user_id: userId,
-      nutrient: g.nutrient,
-      target_value: g.value,
-      unit: g.unit,
-      goal_type: g.goal_type || 'goal',
-      yellow_min: g.yellow_min,
-      green_min: g.green_min,
-      red_min: g.red_min
-    })), {
-      onConflict: 'user_id, nutrient'
-    });
+   * Removes a user's nutritional goal (updates `user_goals` table)
+   */
+  async removeUserGoal(userId: string, nutrient: string) {
+    const { error } = await this.supabase
+      .from('user_goals')
+      .delete()
+      .eq('user_id', userId)
+      .eq('nutrient', nutrient);
+
     if (error) {
-      console.error('[DbService] Error updating user goals:', error);
+      console.error(`[DbService] Error removing user goal for ${userId} - ${nutrient}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Updates multiple user nutritional goals in a single transaction-like call
+   * Supports 'set' (upsert) and 'remove' (delete) actions.
+   */
+  async updateUserGoals(userId: string, goals: any[]) {
+    console.log('[DbService] updateUserGoals called with:', JSON.stringify(goals));
+    const goalsToSet = goals.filter(g => !g.action || g.action === 'set');
+    const goalsToRemove = goals.filter(g => g.action === 'remove');
+
+    // 1. Handle Removals
+    if (goalsToRemove.length > 0) {
+      const nutrientsToRemove = goalsToRemove.map(g => g.nutrient);
+      console.log('[DbService] Removing nutrients:', nutrientsToRemove);
+      const { error: removeError } = await this.supabase
+        .from('user_goals')
+        .delete()
+        .eq('user_id', userId)
+        .in('nutrient', nutrientsToRemove);
+
+      if (removeError) {
+        console.error('[DbService] Error removing bulk user goals:', removeError);
+        throw removeError;
+      }
+    }
+
+    // 2. Handle Updates/Sets
+    if (goalsToSet.length > 0) {
+      const upsertData = goalsToSet.map((g: any) => {
+        // Sanitize goal_type per item
+        let rawType = g.goal_type ? String(g.goal_type) : 'goal';
+        let cleanGoalType = rawType.toLowerCase().trim();
+        if (cleanGoalType !== 'goal' && cleanGoalType !== 'limit') {
+          if (cleanGoalType.includes('limit') || cleanGoalType.includes('max')) {
+            cleanGoalType = 'limit';
+          } else {
+            cleanGoalType = 'goal';
+          }
+        }
+
+        // Validate target_value
+        let finalValue = g.target_value;
+        if (finalValue === undefined || finalValue === null) {
+          finalValue = g.value; // Fallback
+        }
+
+        if (finalValue === undefined || finalValue === null) {
+          console.error(`[DbService] Missing target_value for nutrient ${g.nutrient}. Data:`, g);
+          // We can't insert null into a not-null column. 
+          // If it's a set action, strictly require value.
+          throw new Error(`Missing target_value for nutrient ${g.nutrient}`);
+        }
+
+        return {
+          user_id: userId,
+          nutrient: g.nutrient,
+          target_value: finalValue,
+          unit: g.unit,
+          goal_type: cleanGoalType,
+          yellow_min: g.yellow_min,
+          green_min: g.green_min,
+          red_min: g.red_min
+        };
+      });
+
+      console.log('[DbService] Upserting goals:', JSON.stringify(upsertData));
+      const { error: upsertError } = await this.supabase.from('user_goals').upsert(upsertData, {
+        onConflict: 'user_id, nutrient'
+      });
+
+      if (upsertError) {
+        console.error('[DbService] Error updating user goals:', upsertError);
+        throw upsertError;
+      }
     }
   }
   /**

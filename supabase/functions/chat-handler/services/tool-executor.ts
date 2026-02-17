@@ -12,7 +12,7 @@ import { ValidatorAgent } from '../agents/validator-agent.ts';
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { getStartAndEndOfDay, getDateRange } from '../../_shared/utils.ts';
 import { parseHealthInput } from '../utils/health-parser.ts';
-import { validateNutrientHierarchy, sanitizeNutrients } from '../../_shared/nutrient-validation.ts';
+import { validateNutrientHierarchy, sanitizeNutrients, normalizeNutrientKey, MASTER_NUTRIENT_MAP, NutrientInfo } from '../../_shared/nutrient-validation.ts';
 
 export class ToolExecutor {
   context: any;
@@ -97,7 +97,8 @@ export class ToolExecutor {
           return this.manageHealthConstraints(args.instruction);
         // Goal Tools
         case 'update_user_goal':
-          return this.updateUserGoal(args.nutrient, args.target_value, args.unit, args.goal_type, {
+        case 'update_user_goal':
+          return this.updateUserGoal(args.nutrient, args.target_value, args.unit, args.goal_type, args.action, {
             yellow_min: args.yellow_min,
             green_min: args.green_min,
             red_min: args.red_min
@@ -297,13 +298,21 @@ export class ToolExecutor {
     // Convert array to object for easier reading
     const goalsMap: Record<string, any> = {};
     for (const goal of goals) {
-      goalsMap[goal.nutrient] = {
-        target: goal.target_value,
-        unit: goal.unit || (goal.nutrient === 'calories' ? 'kcal' : 'g'),
-        yellow_min: goal.yellow_min,
-        green_min: goal.green_min,
-        red_min: goal.red_min
-      };
+      // Feature Fix: Normalize and Filter Goals
+      // We only want to show goals that are in our MASTER_NUTRIENT_MAP
+      const normalizedKey = normalizeNutrientKey(goal.nutrient);
+
+      if (MASTER_NUTRIENT_MAP[normalizedKey]) {
+        goalsMap[normalizedKey] = {
+          target: goal.target_value,
+          unit: goal.unit || MASTER_NUTRIENT_MAP[normalizedKey].unit,
+          yellow_min: goal.yellow_min,
+          green_min: goal.green_min,
+          red_min: goal.red_min
+        };
+      } else {
+        console.warn(`[ToolExecutor] Skipping invalid/legacy goal: ${goal.nutrient} -> ${normalizedKey}`);
+      }
     }
     return goalsMap;
   }
@@ -317,7 +326,7 @@ export class ToolExecutor {
     ]);
 
     // Dynamically accumulate any nutrient found in NUTRIENT_MAP
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
     const totals: Record<string, number> = {
       calories: 0,
       items_logged: 0
@@ -458,7 +467,8 @@ export class ToolExecutor {
 
     if (typeof goals === 'object' && !(goals as any).message) {
       // Get technical names for all user goals
-      trackedNutrients = Object.keys(goals).map(key => this.normalizeNutrientName(key));
+      // Goals are already normalized by getUserGoals now
+      trackedNutrients = Object.keys(goals);
     }
 
     // FIX: Only use estimateNutrition when user explicitly provided a positive calorie count.
@@ -531,54 +541,11 @@ export class ToolExecutor {
     return this.estimateNutrition(food, portion, undefined, trackedNutrients);
   }
 
-  private getMasterNutrientMap(): Record<string, { name: string, unit: string }> {
-    return {
-      calories: { name: "Calories", unit: "kcal" },
-      protein_g: { name: "Protein", unit: "g" },
-      fat_total_g: { name: "Total Fat", unit: "g" },
-      carbs_g: { name: "Carbohydrates", unit: "g" },
-      hydration_ml: { name: "Water", unit: "ml" },
-      fat_saturated_g: { name: "Saturated Fat", unit: "g" },
-      fat_poly_g: { name: "Polyunsaturated Fat", unit: "g" },
-      fat_mono_g: { name: "Monounsaturated Fat", unit: "g" },
-      fat_trans_g: { name: "Trans Fat", unit: "g" },
-      omega_3_g: { name: "Omega-3 Fatty Acids", unit: "g" },
-      omega_6_g: { name: "Omega-6 Fatty Acids", unit: "g" },
-      omega_ratio: { name: "Omega 6:3 Ratio", unit: "" },
-      fiber_g: { name: "Dietary Fiber", unit: "g" },
-      fiber_soluble_g: { name: "Soluble Fiber", unit: "g" },
-      sugar_g: { name: "Total Sugars", unit: "g" },
-      sugar_added_g: { name: "Added Sugars", unit: "g" },
-      cholesterol_mg: { name: "Cholesterol", unit: "mg" },
-      sodium_mg: { name: "Sodium", unit: "mg" },
-      potassium_mg: { name: "Potassium", unit: "mg" },
-      calcium_mg: { name: "Calcium", unit: "mg" },
-      iron_mg: { name: "Iron", unit: "mg" },
-      magnesium_mg: { name: "Magnesium", unit: "mg" },
-      phosphorus_mg: { name: "Phosphorus", unit: "mg" },
-      zinc_mg: { name: "Zinc", unit: "mg" },
-      copper_mg: { name: "Copper", unit: "mg" },
-      manganese_mg: { name: "Manganese", unit: "mg" },
-      selenium_mcg: { name: "Selenium", unit: "mcg" },
-      vitamin_a_mcg: { name: "Vitamin A", unit: "mcg" },
-      vitamin_c_mg: { name: "Vitamin C", unit: "mg" },
-      vitamin_d_mcg: { name: "Vitamin D", unit: "mcg" },
-      vitamin_e_mg: { name: "Vitamin E", unit: "mg" },
-      vitamin_k_mcg: { name: "Vitamin K", unit: "mcg" },
-      thiamin_mg: { name: "Thiamin (B1)", unit: "mg" },
-      riboflavin_mg: { name: "Riboflavin (B2)", unit: "mg" },
-      niacin_mg: { name: "Niacin (B3)", unit: "mg" },
-      pantothenic_acid_mg: { name: "Pantothenic Acid (B5)", unit: "mg" },
-      vitamin_b6_mg: { name: "Vitamin B6", unit: "mg" },
-      biotin_mcg: { name: "Biotin (B7)", unit: "mcg" },
-      folate_mcg: { name: "Folate (B9)", unit: "mcg" },
-      vitamin_b12_mcg: { name: "Vitamin B12", unit: "mcg" },
-    };
-  }
+
 
   async estimateNutrition(description: string, portion?: string, calories_hint?: number, trackedNutrients: string[] = []) {
     const openai = createOpenAIClient();
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
 
     const hintPrompt = calories_hint ? `\nIMPORTANT: The user has specified that this food has EXACTLY ${calories_hint} kcal. Your goal is to estimate the macros (protein, carbs, fat) that would logically make up these ${calories_hint} calories for this type of food (using 4 kcal/g for protein/carbs and 9 kcal/g for fat). DO NOT deviate from ${calories_hint} kcal unless absolutely necessary for mathematical consistency.` : 'Always provide realistic estimates - never return 0 calories for foods that have calories.';
 
@@ -986,10 +953,14 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     if (k === 'fat') return 'fat_total_g';
 
     // Master Map lookup
-    const map = this.getMasterNutrientMap();
-    for (const [masterKey, info] of Object.entries(map)) {
+    const map = MASTER_NUTRIENT_MAP;
+    const cleanK = k.replace(/[_ ]/g, '');
+    for (const [masterKey, i] of Object.entries(map)) {
+      const info = i as NutrientInfo;
       if (k === masterKey) return masterKey;
       if (k === info.name.toLowerCase()) return masterKey;
+      // Fuzzy name match (e.g. "vitamin_a" matches "Vitamin A")
+      if (cleanK === info.name.toLowerCase().replace(/[_ ]/g, '')) return masterKey;
     }
 
     // Fallbacks
@@ -1004,10 +975,10 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     return k.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   }
 
-  async updateUserGoal(nutrient: string, targetValue: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', thresholds: any = {}) {
+  async updateUserGoal(nutrient: string, targetValue: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', action: 'set' | 'remove' = 'set', thresholds: any = {}) {
     const proposalId = `goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const normalizedNutrient = this.normalizeNutrientName(nutrient);
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
     const nutrientInfo = map[normalizedNutrient];
 
     // STRICT VALIDATION: If not in master map (and not calories), reject or ask for clarification
@@ -1031,7 +1002,9 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     let message = '';
     const typeLabel = goalType === 'limit' ? 'limit' : 'goal';
 
-    if (isAlreadyTracked) {
+    if (action === 'remove') {
+      message = `Remove your **${officialName}** goal?`;
+    } else if (isAlreadyTracked) {
       if (oldType !== goalType) {
         message = `Change your **${officialName}** from a ${oldType} of ${oldTarget}${defaultUnit} to a **${typeLabel}** of ${targetValue}${unit || defaultUnit}?`;
       } else {
@@ -1056,6 +1029,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
         target_value: targetValue,
         unit: unit || defaultUnit,
         goal_type: goalType,
+        action: action,
         ...cleanedThresholds
       },
       message: message + (Object.keys(cleanedThresholds).length ? ' (with custom color thresholds)' : '')
@@ -1076,8 +1050,11 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
       return {
         nutrient: normalizedNutrient,
-        value: g.target_value,
+        target_value: g.target_value, // Use explicit naming
+        value: g.target_value, // Keep legacy for safety
         unit: g.unit || defaultUnit,
+        goal_type: g.goal_type || 'goal',
+        action: g.action || 'set',
         ...thresholds
       };
     });
@@ -1270,7 +1247,7 @@ Return JSON with: { patterns: string[], insights: string[], suggestions: string[
   private getNutrientValue(data: any, key: string): any {
     if (!data) return undefined;
 
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
     const info = map[key];
     const aliasesList = {
       'fat_total_g': ['fat', 'total_fat', 'fat_g'],

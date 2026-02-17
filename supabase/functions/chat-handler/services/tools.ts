@@ -514,6 +514,11 @@
             enum: ["goal", "limit"],
             description: "Whether this is a target to reach ('goal') or a maximum limit ('limit'). Default is 'goal'."
           },
+          action: {
+            type: "string",
+            enum: ["set", "remove"],
+            description: "Default 'set'. Use 'remove' to delete the goal."
+          },
           yellow_min: {
             type: "number",
             description: "Optional: The progress threshold for yellow status (0.0 to 1.0, e.g., 0.50)"
@@ -528,8 +533,7 @@
           }
         },
         required: [
-          "nutrient",
-          "target_value"
+          "nutrient"
         ]
       }
     }
@@ -577,11 +581,13 @@
                 nutrient: { type: "string", description: "calories, protein, carbs, fat, fiber, sugar, sodium, etc." },
                 target_value: { type: "number" },
                 unit: { type: "string" },
+                goal_type: { type: "string", enum: ["goal", "limit"], description: "Default 'goal'. Use 'limit' for maximums (sodium, sugar, etc)." },
+                action: { type: "string", enum: ["set", "remove"], description: "Default 'set'. Use 'remove' to delete the goal." },
                 yellow_min: { type: "number" },
                 green_min: { type: "number" },
                 red_min: { type: "number" }
               },
-              required: ["nutrient", "target_value"]
+              required: ["nutrient"]
             }
           }
         },
