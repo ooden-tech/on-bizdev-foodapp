@@ -1,202 +1,172 @@
-# Comprehensive Manual Test Flows for NutriPal
+# NutriPal Comprehensive Manual Test Flow
 
-This document outlines the complete manual testing strategy for NutriPal. It covers core functionality, advanced "thinking partner" features, and safeguards.
-
-**Core Philosophy**: NutriPal is an **auditable, stateful, scenario-aware thinking partner**, not just a logger. It should never guess silently, always show its math, and learn from the user.
-
----
-
-## Phase 1: Foundation (Onboarding & Goals)
-**Objective**: Verify the agent can establish the user's context and constraints.
-
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 1.1 | "Hi, I want to set up my goals. I'm targeting 2500 calories and 180g protein." | **Goal Setting**. Updates user profile goals. | Confirms targets set to 2500 cal / 180g protein. asking "Anything else?" |
-- pass
-
-| 1.2 | "I have a peanut allergy and I'm lactose intolerant." | **Health Constraints**. Saves safety constraints. | Confirms constraints. (Verify in DB/response that these are stored).
-- pass
-
-| 1.3 | "What are my current goals?" | **Recall**. Retrieves and displays current targets. | displays the 2500/180g targets and the allergy constraints. |
-- kinda pass, when asked about my goals he just said : 
----Your current goals are set to 2500 calories and 180g of protein. If you need to adjust them or add anything else, just let me know!
-ignoring other goals that i have and track, when i asked "Thats it?" he said "It looks like your instant coffee was a low calorie entry with minimal nutrients. Just remember, it's best to track hydration separately if you're focusing on it! If you have other foods or meals to log, let me know!"
-
-## Phase 2: Core Logging (The Happy Path)
-**Objective**: Verify efficient logging for clear, unambiguous inputs.
-
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 2.1 | "Log 2 boiled eggs and a slice of sourdough toast." | **Direct Proposal**. Recognizes standard items perfectly. | Proposes log with ~14g protein (eggs) + toast carbs. **Confidence: High**. |
-- BIG FAIL,this is how it went
-
-ME: Log 2 boiled eggs and a slice of sourdough toast.
-
-AI: I've prepared the logs for your meal. Please confirm to log the entries!
-
-Verify Log
-sourdough toast
-1 serving
-120 kcal
-Medium Confidence
-
-Nutrition Details
-Calories
-120 kcal
-Protein (g)
-4.0 g
-Carbs (g)
-22 g
-Fat Total (g)
-1.0 g
-Fiber (g)
-0 g
-Sugar (g)
-0 g
-Water
-0 ml
-Cancel
-Log Food
-ME: it seems like its a little low on proteins, are u sure its right?
-
-AI: I noticed a high protein entry with your protein bar, which might not be accurate. Let's double-check to ensure everything is precise. Would you like to review that entry separately?
-
-
-| 2.2 | "Confirm." | **Commit**. | "Logged." Progress bar updates. |
-| 2.3 | "Log 1 scoop of whey protein." | **Standard Assumption**. Uses generic or learned brand. | Proposes ~20-25g protein. |
-- BIG FAIL, look what he proposed to log: 
-I found a match for the whey protein. Does this look right?
-
-Verify Log
-WHEY PROTEIN
-1 serving
-8 kcal
-High Confidence
-
-Nutrition Details
-Calories
-8.0 kcal
-Protein (g)
-0.5 g
-Carbs (g)
-1.1 g
-Fat Total (g)
-0.2 g
-Fiber (g)
-0 g
-Sugar (g)
-0 g
-Water
-0 ml
-
-
-| 2.4 | *[Upload Image of Nutrition Label]* "I ate this entire pack." | **OCR & Parsing**. Extracts stats from image. | Proposal matches label numbers exactly. | - we dont have this yet
+This document covers all core features, behaviors, and edge cases defined in the PRD, Architecture Specs, and Codebase.
+**Format**: Each test acts as a manual script. Execute the message and verifying the result matches the expectation.
 
 ---
 
-## Phase 3: The "Thinking" Path (Ambiguity & Confidence)
-**Objective**: Verify the agent handles uncertainty correctly (Features 3 & 4).
+## Part 1: Foundation (Onboarding & Configuration)
 
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 3.1 | "Log a bowl of pasta." | **Clarification**. High ambiguity. | **Stops & Asks**: "How big? What sauce? Any meat?" (Does NOT propose yet). |
-- fail, he still proposed to log it with low confidence 
-| 3.2 | "It was carbonara, normal restaurant portion." | **Estimation**. Medium ambiguity. | Proposes log with **Low/Medium Confidence**. Explains: "Restaurant portions vary, assuming ~800-1000 cal." |
-- fail, he proposed to log it with low confidence
-| 3.3 | "Actually it was a small starter portion." | **Refinement**. | Updates proposal to lower values. |
-- Pass, he updated the proposal to lower values 
-| 3.4 | "Log 3 oreos." | **Specific Assumption**. | Proposes log with **High Confidence** (standard packaged food). |
-FAIL, he proposed to log it with medium confidence, after i said that its stock packaged oreo he said it helps but still proposed a log with medium confidence , Just to clarify, are you confirming that they are the standard packaged Oreos? This helps ensure the nutrition info is accurate! medioum confidence, Estimated per cookie based on typycal oreo nutrition data
----
+### 1. Testing Goal Setting
+**Message**: "Set my goals to 2400 calories, 180g protein, and 80g fat."
+**Result**: it understood what i wanted and set calories and protein but not fat, even tho it said it did, when i mention that my total fat is still at 200 g, it gave me generic insight "t seems your total fat intake is significantly exceeding your goal of 80g", then i asked to set my fat gaol to 80 and it said "Updated your fat_total_g goal to 80g" but in reality in the dashboard my total fat is still at 200g
 
-## Phase 4: Learning & Memory (Feature 6)
-**Objective**: Verify corrections persist and are applied to future interactions.
+### 2. Testing Goal Recall
+**Message**: "What are my current goals?"
+**Result**: "Your current goals include a fat intake limit of 80g.
+Note that you've consumed two portions of Big Mac, which significantly contributed to high calorie and fat levels today. Also, your hydration with 200 ml is a bit low—consider boosting your water intake!
+Would you like to adjust any of your meals or set any new goals?" the answer is limited and generic, i dont fell like it was very usefull but not too bad
 
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 4.1 | "Log a latte." | **Baseline**. Proposes standard milk. | Proposal has Whole/2% milk. |
-| 4.2 | "No, I only drink oat milk." | **Correction & Learn**. | "Updated to Oat Milk. **I'll remember you prefer oat milk.**" |
-| 4.3 | "Confirm." | **Commit**. | Logged with Oat Milk. |
-| 4.4 | "Log another latte." | **Recall & Apply**. | Proposal **automatically** uses Oat Milk. |
-| 4.5 | "Log a greek yogurt." | **Baseline**. | Standard yogurt. |
-| 4.6 | "I usually have Chobani Zero Sugar." | **Brand Learning**. | Updates and remembers "Greek Yogurt" -> "Chobani Zero Sugar". |
+### 3. Testing Health Constraint Setup
+**Message**: "I have a peanut allergy and I am lactose intolerant."
+**Result**: "Just a heads up, I noted your peanut allergy and lactose intolerance. If you need help avoiding these in your meals or recipes, just let me know!
 
----
+Your current nutrition goals are:
+Calories: 2400 kcal
+Protein: 180g
+Carbohydrates: 200g
+Fat: 80g
+Sugar: 50g
+Fiber: 100g
+Trans Fat: 200g
+Hydration: 2991 ml
+If you’d like to adjust any goals or track something specific, I’m here to help!" It feels like context from previous message bleed over, also he mentions trans fat 200 and fat 80 while in the dashboard i have only fat total 200 g
 
-## Phase 5: Recipe Workflow (Parse -> Save -> Log)
-**Objective**: Verify the Recipe Agent's specific capabilities.
+### 4. Testing Constraint Verification
+**Message**: "What are my health constraints?"
+**Result**: "It seems I don't have any recorded health constraints for you yet. However, you've mentioned a peanut allergy and lactose intolerance. Would you like me to update your profile with these constraints, or are there any others to add?" when i said to update the profile he did this: "Your health profile has now been updated to include:
+Peanut Allergy: Marked as critical.
+Lactose Intolerance: Marked as a warning.
+If you have any other dietary needs or restrictions you'd like to adjust, feel free to let me know!" and when i asked again what are my health constraints, he said what it was, peanuts and lactose. BUT, when i started new chat and asked What are my health constraints? he said "I'm here to help with your nutritional needs! If you have any specific allergies, intolerances, or medical conditions that I should keep in mind, please let me know, and I'll check for those!"---
 
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 5.1 | *[Paste full text of a Chicken Pesto Pasta recipe]* "Save this recipe." | **Recipe Parsing**. Extracts ingredients & calculates batch stats. | Shows parsed ingredients list. "Total calories per batch: X. How many servings?" |
-| 5.2 | "It makes 4 servings." | **Calculation**. | "Okay, that's Y calories per serving. Saved as 'Chicken Pesto Pasta'." |
-| 5.3 | "Log 1 serving of that pasta." | **Log Saved Item**. | Proposes logging the saved recipe stats. |
-| 5.4 | "What's in that pasta again?" | **Recipe Detail**. | Lists ingredients/macros of the saved recipe. |
+## Part 2: Core Food Logging (The Happy Path)
 
-RESULTS: It did parse the ingridients and propose to save it, assumed the amount of serving and total batch, but he named it "String" instead of real name 
+### 5. Testing Simple Item Log
+**Message**: "Log 2 boiled eggs."
+**Result**: he calculated and logged it properly, only things is at it marked it as 1 serving with name Large egg, Boiled. Even tho nutrients were right amount for two eggs, not critical but a error nevertheles
 
----
+### 6. Testing Multi-Item Log
+**Message**: "Log 150g grilled chicken breast and a cup of white rice."
+**Result**: he said "I've prepared the log for your grilled chicken breast and white rice. Please confirm if everything looks correct, and I'll log it for you!" but didnt show log food modal, when i said that i dont see anything, he said "It seems the meal you're trying to log would put you over your calorie goal for today. You've already consumed 2470 calories, while your target is 2400. Would you like to adjust your meal or proceed with the log anyway?", then i asked i dont see any log and he finally showed me log modal with name "Grilled Chicken Breast + 1 more" but macros seems right, In the dashboard, its two different logs, grilled chicken breast (150 g) and cooked white rice (1 cup)
 
-## Phase 6: Safety & Constraints (Feature 7)
-**Objective**: Verify the Safety Agent intercepts harmful choices.
+### 7. Testing Brand/Specific Log
+**Message**: "Log 1 scoop of Optimum Nutrition Gold Standard Whey."
+**Result**: he said "Just a heads up, this whey protein contains dairy. Your current calorie intake is already 3340, exceeding your target of 2400. Would you like to proceed with logging it anyway?" but my dashboard showing me claories being at 1670 with goal of 2400, so  i dont understand what happened here. Also he did propose to log it and macros seem right, but he logging it as if i ate a dry scoop, he didnt ask what i mixed it with and didnt assume anything, but still, it is a bit dumb he proposed macros for dry scoop. When i clarified that i mixed it with 200 ml water, he corrected and added 200 ml water to the macros.
 
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 6.1 | "Log a Snickers bar." | **Safety Check**. (Recall Peanut Allergy from Phase 1). | Proposal appears + **Warning**: "Contains peanuts." Narrative: "Just a heads up, this has peanuts." |
-| 6.2 | "Log a cheese sandwich." | **Intolerance Check**. (Recall Lactose Intolerance). | Proposal + **Flag**: "Contains Dairy". |
-- FAIL, he just ingored all the restrictions and alergies
+### 8. Testing Confirmation Flow
+**Message**: [After Step 7 Proposal] "Confirm."
+**Result**: succes
 
----
-
-## Phase 7: Analysis & Planning (Features 5 & 8)
-**Objective**: Verify "Thinking Partner" capabilities (What-If & Insights).
-
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 7.1 | "If I eat a burger for dinner, will I go over my fat limit?" | **Scenario (What-If)**. | **No Log**. Calculates "Current + Burger". Says: "Yes, you'd be 10g over." |
-
-- FAIL, he just went wiht normal logging: if i eat 2 bigmack, will go over my fat limit?
-
-I can help with that! However, I need to clarify: How do you normally prepare or order your Big Macs? Also, could you confirm the usual portion size? The fat content can vary based on these details, and it's important for accuracy.
-
-standard bigmack from mcdonalds
-
-I found the nutrition info for two standard Big Macs. Just a heads up, that's high in calories and sodium. Does this look right for your log?
-
-
-| 7.2 | "What about a grilled chicken salad?" | **Scenario Comparison**. | Calculates alternative. "That keeps you under limit by 5g." |
-| 7.3 | "Why is my sodium so high today?" | **Audit Mode**. | "Your lunch soup contributed 1200mg (60% of total)." Itemized breakdown. |
-
--FAIL : Why is my sugar so hight today?
-I encountered an unexpected error. Please try again. (Invalid time value)
-
-
-| 7.4 | "How am I doing this week?" | **Summary**. | Bullet points. Trends. No essays. |
+### 9. Testing Cancellation
+**Message**: "Log a pizza." -> [Wait for proposal] -> "Cancel."
+**Result**: He asked for clarification, which is good, macros seemes good, canceled successfully
 
 ---
 
-## Phase 8: Exception Handling (Feature 9)
-**Objective**: Verify day classification and mode switching.
+## Part 3: Ambiguity & The "Thinking Partner"
 
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 8.1 | "I'm traveling today, so food choices are limited." | **Day Classification**. | "Marked as **Travel Day**. I'll check sodium but relax macro precision." |
-| 8.2 | "Log a fast food burger." | **Context Aware**. | Logs it. Feedback is pragmatic, not judgmental. |
+### 10. Testing Ambiguity Detection (Size)
+**Message**: "Log a bowl of pasta."
+**Result**: [Should ask for clarification on size/type] success, he did just that
 
----
+### 11. Testing Clarification Response
+**Message**: "It was a large serving of carbonara from a restaurant."
+**Result**: [Should propose estimation with Low Confidence warning]. He said "Just a heads up, this carbonara contains dairy, which may need to be considered based on your dietary preferences.
+I found a match for a large serving of carbonara. Does this look right?" but no log modal was shown, when i said that i dont see anything he said "I apologize for the confusion! I can't log the carbonara yet because I need to clarify a couple of things.
+Could you specify how large the serving was? Was it a regular portion, or would you consider it to be double the typical size? This will help me get it right!", i again clarifed and again he proposed the log without the modal, when i said i still dont see anything he again asked for clarification.
 
-## Phase 9: Regression Stress Test (The "Waffle" Loop)
-**Objective**: Ensure past bugs are fixed.
-
-| Step | User Message | Expected Agent Behavior | Success Criteria |
-|------|--------------|-------------------------|------------------|
-| 9.1 | "Log a Whole Foods 365 Homestyle Waffle." | **Search/Parse**. | Finds item (or asks once). |
-| 9.2 | (Optional) "It's the frozen one." | **Proposal**. | Proposes log immediately. |
-| 9.3 | "Yes." | **Commit**. | Logs it. **NO infinite confirmation loop.** |
+### 12. Testing Vague Item
+**Message**: "Log a sandwich."
+**Result**: [Should ask what kind of sandwich] succes, he did just that, when i specified that it was two slice of american toast bread, one slice of cheddar and 3 slice of salami, he propposed the log with right macros but **he didnt catch that chedder contains dairy, which is a problem**
 
 ---
 
-## Final Check: Nutrient Integrity (Feature 10)
-*   **Action**: Log an item with rich fat data (e.g., Avocado).
-*   **Check**: View "Today's Progress".
-*   **Success**: `Total Fat` >= `Saturated` + `Poly` + `Mono`. Sub-nutrients are indented/nested in UI/Text response.
+## Part 4: Learning, Memory & Corrections
+
+### 13. Testing Preference Learning
+**Message**: "Log a latte." -> [Proposal uses Whole Milk] -> "No, I always drink oat milk."
+**Result**: [Should update to Oat Milk and confirm memory storage]
+
+### 14. Testing Preference Recall
+**Message**: "Log another latte."
+**Result**: [Should automatically propose Oat Milk]
+
+### 15. Testing Brand Learning
+**Message**: "When I say yogurt, I mean Chobani Zero Sugar."
+**Result**: 
+
+### 16. Testing Brand Application
+**Message**: "Log a yogurt."
+**Result**: [Should propose Chobani Zero Sugar]
+
+---
+
+## Part 5: Recipe Management
+
+### 17. Testing Recipe Parsing (Save)
+**Message**: "Save this recipe: Chicken Pesto Pasta. Ingredients: 500g Chicken Breast, 200g Pesto, 400g Penne Pasta. Serves 4."
+**Result**: [Should show parsed ingredients and batch nutrition]
+
+### 18. Testing Recipe Confirmation
+**Message**: "Yes, save it."
+**Result**: 
+
+### 19. Testing Recipe Logging
+**Message**: "Log 1 serving of Chicken Pesto Pasta."
+**Result**: 
+
+### 20. Testing Recipe Detail Query
+**Message**: "What's in the Chicken Pesto Pasta?"
+**Result**: 
+
+---
+
+## Part 6: Safety & Constraints
+
+### 21. Testing Allergen Warning (Peanut)
+**Message**: "Log a Snickers bar." [Recall Peanut Allergy from Test 3]
+**Result**: [Should propose but include strong warning about peanuts]
+
+### 22. Testing Intolerance Flag (Dairy)
+**Message**: "Log a cheese sandwich." [Recall Lactose Intolerance]
+**Result**: [Should flag dairy content]
+
+---
+
+## Part 7: Analysis, Insights & What-Ifs
+
+### 23. Testing Daily Summary
+**Message**: "How am I doing today?"
+**Result**: [Should show bullet points of progress vs goals]
+
+### 24. Testing "What-If" Scenario (Planning)
+**Message**: "If I eat a burger for dinner, will I go over my fat limit?"
+**Result**: [Should calculate hygiene without logging]
+
+### 25. Testing Scenario Comparison
+**Message**: "What about grilled salmon instead?"
+**Result**: 
+
+### 26. Testing Audit/Explanation
+**Message**: "Why is my protein so high?"
+**Result**: [Should breakdown contributors]
+
+---
+
+## Part 8: Edge Cases & Context
+
+### 27. Testing Day Classification (Travel)
+**Message**: "I'm traveling today, so I have less control over food."
+**Result**: [Should classify day as 'Travel' and adjust expectations]
+
+### 28. Testing Contextual Log (Travel Day)
+**Message**: "Log a fast food burger."
+**Result**: [Should be non-judgmental]
+
+### 29. Testing Correction of Logged Item
+**Message**: "Actually, that burger was a double."
+**Result**: [Should update the previous log]
+
+### 30. Testing "Delete" Command
+**Message**: "Remove the last item."
+**Result**: 

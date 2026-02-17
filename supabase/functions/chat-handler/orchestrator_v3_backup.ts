@@ -20,7 +20,6 @@ import { DbService } from './services/db-service.ts';
 import { PersistenceService } from './services/persistence-service.ts';
 import { SessionService } from './services/session-service.ts';
 import { ToolExecutor } from './services/tool-executor.ts';
-import { PipelineContext } from './types.ts';
 class ThoughtLogger {
   steps: string[] = [];
   log(step: string) {
@@ -80,10 +79,7 @@ function decorateWithContext(message: string, pendingAction: any): string {
   const userGoals = await db.getUserGoals(userId);
   const trackedNutrients = userGoals?.map((g: any) => g.nutrient) || [];
 
-  // Feature 4: Unified Pipeline Context
-  const userProfile = (await db.getUserProfile(userId))?.data;
-
-  const context: PipelineContext = {
+  const context = {
     userId,
     sessionId,
     supabase,
@@ -92,10 +88,7 @@ function decorateWithContext(message: string, pendingAction: any): string {
     healthConstraints,
     memories,
     dayClassification, // { day_type: 'travel' | 'sick' | ..., notes: ... }
-    trackedNutrients,
-    userGoals,
-    userProfile,
-    db // Inject DB service for agents to use if needed
+    trackedNutrients
   };
   const startTime = Date.now();
   const thoughts = new ThoughtLogger();
@@ -224,9 +217,73 @@ function decorateWithContext(message: string, pendingAction: any): string {
       };
     }
     // =========================================================
-    // STEP 1: Recipe Heuristic (REMOVED - Handled by ReasoningAgent)
+    // STEP 1: Recipe Heuristic (Speed for long texts)
     // =========================================================
-    // Fast path for recipes removed to use ReasoningAgent intelligence
+    const seemsLikeRecipe = message.length > 200 || message.includes('\n') && message.split('\n').length > 3 || message.toLowerCase().includes('recipe') && message.length > 50;
+    if (seemsLikeRecipe) {
+      const consumptionKeywords = [
+        'ate',
+        'had',
+        'log',
+        'consumption',
+        'portion',
+        'serving',
+        'having'
+      ];
+      const hasConsumption = consumptionKeywords.some((k) => lowerMessage.includes(k));
+      if (!hasConsumption) {
+        console.log('[OrchestratorV3] Recipe heuristic triggered (Direct Route)');
+        reportStep('Analyzing recipe...');
+        const toolExecutor = new ToolExecutor({
+          userId,
+          supabase,
+          timezone,
+          sessionId,
+          healthConstraints: context.healthConstraints
+        });
+        const parseResult = await toolExecutor.execute('parse_recipe_text', {
+          recipe_text: message
+        });
+        if (parseResult.proposal_type === 'recipe_save' && parseResult.flowState) {
+          await sessionService.savePendingAction(userId, {
+            type: parseResult.proposal_type,
+            data: parseResult
+          });
+          response.response_type = 'confirmation_recipe_save';
+          const fs = parseResult.flowState;
+          response.data = {
+            isMatch: parseResult.response_type === 'pending_duplicate_confirm',
+            existingRecipeName: fs.existingRecipeName,
+            parsed: {
+              recipe_name: fs.parsed.recipe_name,
+              servings: fs.parsed.servings,
+              nutrition_data: fs.batchNutrition,
+              ingredients: fs.ingredientsWithNutrition?.map((ing: any) => ({
+                name: ing.name,
+                amount: ing.amount || ing.quantity || '',
+                unit: ing.unit || '',
+                calories: ing.nutrition?.calories || 0
+              })) || []
+            },
+            preview: message.substring(0, 100) + '...'
+          };
+          const chatAgent = new ChatAgent();
+          response.message = await chatAgent.execute({
+            userMessage: message,
+            intent: 'save_recipe',
+            data: {
+              proposal: parseResult,
+              toolsUsed: [
+                'parse_recipe_text'
+              ]
+            },
+            history: chatHistory
+          }, context);
+          response.steps = thoughts.getSteps();
+          return response;
+        }
+      }
+    }
     // =========================================================
     // STEP 2: IntentAgent - Classification (The Router)
     // =========================================================
@@ -387,19 +444,382 @@ function decorateWithContext(message: string, pendingAction: any): string {
         };
       case 'log_food':
       case 'query_nutrition':
-        // Clear stale pending actions for new logs
+        // Clear any stale pending actions from previous turns (Zombie Chicken Fix)
+        // BUT preserve context if we are just querying details (e.g. "What ingredients?")
         if (intent === 'log_food') {
           await sessionService.clearPendingAction(userId);
         }
-        // All food logging and nutrition queries are handled by the ReasoningAgent
-        // which has access to ask_nutrition_agent (with safety, memory, verification)
-        console.log('[OrchestratorV3] Routing log_food/query_nutrition to ReasoningAgent');
+
+        // Simple logging or query can often bypass reasoning if entities are clear
+        // But for now, we'll let reasoning handle it to maintain the tool orchestration
+        // UNLESS it's a very simple one-item log.
+        if (intentResult.food_items?.length === 1 && !message.includes(' recipes') && !message.includes(' yesterday')) {
+          const food = intentResult.food_items[0];
+          const portion = intentResult.portions?.[0] || '1 serving';
+          // PRIORITIZE SAVED RECIPES (Fulfills request to clarify logging source)
+          console.log(`[OrchestratorV3] Checking for saved recipes matching "${food}"...`);
+          const recipeAgentForLog = new RecipeAgent();
+          const findResultForLog = await recipeAgentForLog.execute({
+            type: 'find',
+            name: food
+          }, context);
+          if (findResultForLog.type === 'multiple_found') {
+            // Multiple recipes match - ask user to select one
+            console.log(`[OrchestratorV3] Found ${findResultForLog.recipes.length} recipes matching "${food}"`);
+            await sessionService.savePendingAction(userId, {
+              type: 'recipe_selection',
+              data: {
+                recipes: findResultForLog.recipes,
+                query: food,
+                original_portion: portion
+              }
+            });
+            response.response_type = 'recipe_selection';
+            response.data = {
+              recipes: findResultForLog.recipes.map((r: any) => ({
+                id: r.id,
+                recipe_name: r.recipe_name,
+                servings: r.servings,
+                calories_per_serving: r.calories_per_serving,
+                ingredients: r.ingredients // Explicitly passed
+              })),
+              query: food
+            };
+            const chatAgent = new ChatAgent();
+            response.message = `I found ${findResultForLog.recipes.length} recipes matching "**${food}**". Which one would you like to log?\n\n${findResultForLog.recipes.map((r: any, i: number) => `${i + 1}. **${r.recipe_name}** (${r.servings} serving(s), ~${r.calories_per_serving} kcal each)`).join('\n')}`;
+            return {
+              ...response,
+              steps: thoughts.getSteps()
+            };
+          } else if (findResultForLog.type === 'found') {
+            console.log(`[OrchestratorV3] Found saved recipe match for "${food}" during log_food intent`);
+            const recipe = findResultForLog.recipe;
+            // Calculate per-serving nutrition
+            const perServingNutrition = scaleNutrition(recipe.nutrition_data || {}, 1 / (recipe.servings || 1));
+            const fs = {
+              step: 'pending_duplicate_confirm',
+              parsed: {
+                recipe_name: recipe.recipe_name,
+                servings: recipe.servings,
+                ingredients: recipe.recipe_ingredients?.map((ing: any) => ({
+                  name: ing.ingredient_name,
+                  quantity: ing.quantity,
+                  unit: ing.unit
+                })) || []
+              },
+              batchNutrition: recipe.nutrition_data,
+              perServingNutrition,
+              existingRecipeId: recipe.id,
+              existingRecipeName: recipe.recipe_name
+            };
+            await sessionService.savePendingAction(userId, {
+              type: 'recipe_save',
+              data: {
+                flowState: fs,
+                response_type: 'pending_duplicate_confirm',
+                pending: true,
+                portion
+              }
+            });
+            response.response_type = 'confirmation_recipe_save';
+            response.data = {
+              isMatch: true,
+              existingRecipeName: recipe.recipe_name,
+              parsed: {
+                ...fs.parsed,
+                nutrition_data: fs.batchNutrition,
+                per_serving_nutrition: perServingNutrition,
+                ingredients: recipe.recipe_ingredients?.map((ing: any) => ({
+                  name: ing.ingredient_name,
+                  amount: ing.quantity,
+                  unit: ing.unit,
+                  calories: ing.nutrition_data?.calories || 0,
+                  nutrition_data: ing.nutrition_data
+                })) || []
+              }
+            };
+            const chatAgentLogMatch = new ChatAgent();
+            response.message = `I found your saved recipe for "**${recipe.recipe_name}**"! Would you like to use it for this log?`;
+            return {
+              ...response,
+              steps: thoughts.getSteps()
+            };
+          }
+          console.log('[OrchestratorV3] Branch: simple_log_food');
+          reportStep('Looking up nutrition...');
+          const nutritionData = await toolExecutor.execute('lookup_nutrition', {
+            food,
+            portion,
+            calories: intentResult.calories, // Use intentResult.calories for consistency
+            protein_g: intentResult.macros?.protein_g,
+            carbs_g: intentResult.macros?.carbs_g,
+            fat_total_g: intentResult.macros?.fat_total_g,
+            healthConstraints: context.healthConstraints, // Assuming healthConstraints is in context
+            memories: context.memories, // Assuming memories is in context
+            trackedNutrients: context.trackedNutrients, // Assuming trackedNutrients is in context
+            originalDescription: message // Pass original message for context (e.g. "with water")
+          });
+
+          // SAFETY CHECK: Block logging if food conflicts with health constraints
+          // FIX: Cross-reference LLM-generated health flags (e.g. "Contains peanuts")
+          // against the user's actual health constraints by category + severity.
+          // Previously checked for "CRITICAL" substring which never matched the LLM output format.
+          const criticalFlags = (nutritionData.health_flags || []).filter((flag: string) => {
+            const lowerFlag = flag.toLowerCase();
+            return (context.healthConstraints || []).some((c: any) =>
+              c.severity === 'critical' && lowerFlag.includes(c.category.toLowerCase())
+            );
+          });
+
+          if (criticalFlags.length > 0) {
+            console.warn(`[OrchestratorV3] Health Warning for "${food}": ${criticalFlags.join(', ')}`);
+            // FIX: Don't block — user wants WARNING not BLOCK.
+            // Add warning to nutritionData so it shows in the proposal, but continue with normal flow.
+            nutritionData.health_warning = `⚠️ Heads up: this contains ${criticalFlags.map((f: string) => f.replace(/contains /i, '').replace(/may contain /i, '')).join(', ')}. Please confirm you're okay with this.`;
+          }
+
+          const proposal = await toolExecutor.execute('propose_food_log', {
+            ...nutritionData
+          });
+          await sessionService.savePendingAction(userId, {
+            type: 'food_log',
+            data: proposal.data
+          });
+          const chatAgentLog = new ChatAgent();
+          response.message = await chatAgentLog.execute({
+            userMessage: message,
+            intent: 'log_food',
+            data: {
+              proposal,
+              toolsUsed: [
+                'lookup_nutrition'
+              ]
+            },
+            history: chatHistory
+          }, context);
+          response.response_type = 'confirmation_food_log';
+          response.data = {
+            nutrition: [
+              proposal.data
+            ],
+            proposal
+          };
+          return {
+            ...response,
+            steps: thoughts.getSteps()
+          };
+        }
+        // FIX: Multi-item food logs (e.g. "log chicken and rice") skip the single-item
+        // if-block above. Without this break, they fall through into log_recipe handling.
+        // Instead, let them reach the ReasoningAgent fallback at STEP 4.
         break;
       case 'log_recipe':
-      case 'save_recipe':
-        // Route to ReasoningAgent for recipe handling
+        // Clear any stale pending actions from previous turns
         await sessionService.clearPendingAction(userId);
-        console.log(`[OrchestratorV3] Routing ${intent} to ReasoningAgent`);
+
+        // Shortcut: If intent is log_recipe and message is large or context exists
+        if (message.length > 500 || intentResult.recipe_text) {
+          console.log('[OrchestratorV3] Branch: log_recipe_shortcut (parse)');
+          reportStep('Parsing recipe...');
+          const recipeText = intentResult.recipe_text || message;
+          const parseResult = await toolExecutor.execute('parse_recipe_text', {
+            recipe_text: recipeText
+          });
+          if (parseResult.proposal_type === 'recipe_save' && parseResult.flowState) {
+            await sessionService.savePendingAction(userId, {
+              type: 'recipe_save',
+              data: parseResult
+            });
+            const isMatch = parseResult.response_type === 'pending_duplicate_confirm';
+            response.response_type = 'confirmation_recipe_save';
+            const fs = parseResult.flowState;
+            response.data = {
+              isMatch,
+              existingRecipeName: fs.existingRecipeName,
+              parsed: {
+                recipe_name: fs.parsed.recipe_name,
+                servings: fs.parsed.servings,
+                nutrition_data: fs.batchNutrition,
+                ingredients: fs.ingredientsWithNutrition?.map((ing: any) => ({
+                  name: ing.name,
+                  amount: ing.amount || ing.quantity || '',
+                  unit: ing.unit || '',
+                  calories: ing.nutrition?.calories || 0
+                })) || []
+              }
+            };
+            const chatAgentRecipe = new ChatAgent();
+            response.message = await chatAgentRecipe.execute({
+              userMessage: message,
+              intent: 'log_recipe',
+              data: {
+                proposal: parseResult,
+                toolsUsed: [
+                  'parse_recipe_text'
+                ]
+              },
+              history: chatHistory
+            }, context);
+            return {
+              ...response,
+              steps: thoughts.getSteps()
+            };
+          }
+        } else {
+          // Simple search by name
+          const recipeName = intentResult.food_items?.[0] || message;
+          console.log('[OrchestratorV3] Branch: log_recipe_shortcut (search)');
+
+          // Clean the query to remove "log", "my", "track" prefix if falling back to message
+          let query = recipeName;
+          if (query === message) {
+            query = query.replace(/^(log|track|have|had|ate|record)\s+(my\s+)?/i, '').trim();
+          }
+
+          reportStep(`Searching for "${query}" in your recipes...`);
+          const recipeAgent = new RecipeAgent();
+          const findResult = await recipeAgent.execute({
+            type: 'find',
+            name: query
+          }, context);
+          if (findResult.type === 'multiple_found') {
+            // Multiple recipes match - ask user to select one
+            console.log(`[OrchestratorV3] Found ${findResult.recipes.length} recipes matching "${query}"`);
+            await sessionService.savePendingAction(userId, {
+              type: 'recipe_selection',
+              data: {
+                recipes: findResult.recipes,
+                query: query,
+                original_intent: 'log_recipe'
+              }
+            });
+            response.response_type = 'recipe_selection';
+            response.data = {
+              recipes: findResult.recipes.map((r: any) => ({
+                id: r.id,
+                recipe_name: r.recipe_name,
+                servings: r.servings,
+                calories_per_serving: r.calories_per_serving,
+                ingredients: r.ingredients // Explicitly passed
+              })),
+              query: query
+            };
+            response.message = `I found ${findResult.recipes.length} recipes matching "**${query}**". Which one would you like to work with?\n\n${findResult.recipes.map((r: any, i: number) => `${i + 1}. **${r.recipe_name}** (${r.servings} serving(s), ~${r.calories_per_serving} kcal each)`).join('\n')}`;
+            return {
+              ...response,
+              steps: thoughts.getSteps()
+            };
+          } else if (findResult.type === 'found') {
+            // We found it! Trigger the same "Duplicate Found" modal so user can choose log/update/new
+            // This fulfills: "If we have the recipe saved we need to ask user what he wants, showing the modal to log, update, or do the edited log"
+            // Convert saved recipe back to a pseudo-parsed format for the flowState
+            const recipe = findResult.recipe;
+            // Calculate per-serving nutrition
+            const perServingNutrition = scaleNutrition(recipe.nutrition_data || {}, 1 / (recipe.servings || 1));
+            const fs = {
+              step: 'pending_duplicate_confirm',
+              parsed: {
+                recipe_name: recipe.recipe_name,
+                servings: recipe.servings,
+                ingredients: recipe.recipe_ingredients?.map((ing: any) => ({
+                  name: ing.ingredient_name,
+                  quantity: ing.quantity,
+                  unit: ing.unit
+                })) || []
+              },
+              batchNutrition: recipe.nutrition_data,
+              perServingNutrition,
+              existingRecipeId: recipe.id,
+              existingRecipeName: recipe.recipe_name
+            };
+            await sessionService.savePendingAction(userId, {
+              type: 'recipe_save',
+              data: {
+                flowState: fs,
+                response_type: 'pending_duplicate_confirm',
+                pending: true
+              }
+            });
+            response.response_type = 'confirmation_recipe_save';
+            response.data = {
+              isMatch: true,
+              existingRecipeName: recipe.recipe_name,
+              parsed: {
+                ...fs.parsed,
+                nutrition_data: fs.batchNutrition,
+                per_serving_nutrition: perServingNutrition,
+                ingredients: recipe.recipe_ingredients?.map((ing: any) => ({
+                  name: ing.ingredient_name,
+                  amount: ing.quantity,
+                  unit: ing.unit,
+                  calories: ing.nutrition_data?.calories || 0,
+                  nutrition_data: ing.nutrition_data
+                })) || []
+              }
+            };
+            const chatAgentFound = new ChatAgent();
+            response.message = `I found your recipe for "**${recipe.recipe_name}**"! What would you like to do?`;
+            // Ensure we tell the UI what recipe this is
+            return {
+              ...response,
+              steps: thoughts.getSteps()
+            };
+          } else {
+            // Not found? fallback to reasoning for nutrition estimate or new parse
+            console.log('[OrchestratorV3] Recipe not found by name, falling back to Reasoning');
+          }
+        }
+        break;
+      case 'save_recipe':
+        console.log('[OrchestratorV3] Branch: save_recipe');
+        // Clear any stale pending actions from previous turns
+        await sessionService.clearPendingAction(userId);
+
+        reportStep('Parsing recipe...');
+        const saveRecipeText = intentResult.recipe_text || message;
+        const saveParseResult = await toolExecutor.execute('parse_recipe_text', {
+          recipe_text: saveRecipeText
+        });
+        if (saveParseResult.proposal_type === 'recipe_save' && saveParseResult.flowState) {
+          await sessionService.savePendingAction(userId, {
+            type: 'recipe_save',
+            data: saveParseResult
+          });
+          const isMatch = saveParseResult.response_type === 'pending_duplicate_confirm';
+          response.response_type = 'confirmation_recipe_save';
+          const fs = saveParseResult.flowState;
+          response.data = {
+            isMatch,
+            existingRecipeName: fs.existingRecipeName,
+            parsed: {
+              recipe_name: fs.parsed.recipe_name,
+              servings: fs.parsed.servings,
+              nutrition_data: fs.batchNutrition,
+              ingredients: fs.ingredientsWithNutrition?.map((ing: any) => ({
+                name: ing.name,
+                amount: ing.amount || ing.quantity || '',
+                unit: ing.unit || '',
+                calories: ing.nutrition?.calories || 0
+              })) || []
+            }
+          };
+          const chatAgentSaveRecipe = new ChatAgent();
+          response.message = await chatAgentSaveRecipe.execute({
+            userMessage: message,
+            intent: 'save_recipe',
+            data: {
+              proposal: saveParseResult,
+              toolsUsed: [
+                'parse_recipe_text'
+              ]
+            },
+            history: chatHistory
+          }, context);
+          return {
+            ...response,
+            steps: thoughts.getSteps()
+          };
+        }
         break;
     }
     // =========================================================
@@ -413,11 +833,7 @@ function decorateWithContext(message: string, pendingAction: any): string {
       intent: {
         type: intentResult.intent,
         confidence: intentResult.confidence,
-        entities: intentResult.entities,
-        food_items: intentResult.food_items,
-        portions: intentResult.portions,
-        ambiguity_level: intentResult.ambiguity_level,
-        ambiguity_reasons: intentResult.ambiguity_reasons
+        entities: intentResult.entities
       },
       chatHistory
     }, context);
@@ -480,8 +896,9 @@ function decorateWithContext(message: string, pendingAction: any): string {
     if (activeProposal) {
       const p = activeProposal;
       if (p.type === 'food_log') {
-        // Handle batch proposals (array of items) or single item
-        response.data.nutrition = Array.isArray(p.data) ? p.data : [p.data];
+        response.data.nutrition = [
+          p.data
+        ];
         response.response_type = 'confirmation_food_log';
       } else if (p.type === 'recipe_log') {
         response.data.nutrition = [
@@ -581,19 +998,13 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
     'folate_mcg', 'vitamin_b12_mcg'
   ];
 
-  // FIX: Iterate over keys present in nutritionData, not just tracked keys
-  // This ensures we capture everything the AI gave us that fits in the DB.
-  Object.keys(nutritionData).forEach((key: string) => {
-    if (key !== 'calories' && key !== 'food_name' && key !== 'portion' && key !== 'recipe_id' && key !== 'recipe_name') {
+  trackedKeys.forEach((key: string) => {
+    if (nutritionData[key] !== undefined && key !== 'calories') {
       const val = typeof nutritionData[key] === 'number' ? Math.round(nutritionData[key] * 10) / 10 : nutritionData[key];
-
       if (schemaColumns.includes(key)) {
         item[key] = val;
       } else {
-        // Only add significant extras (ignore internal flags)
-        if (key !== 'confidence' && key !== 'confidence_details' && key !== 'error_sources' && key !== 'health_flags' && key !== 'applied_memory') {
-          extras[key] = val;
-        }
+        extras[key] = val;
       }
     }
   });
@@ -614,27 +1025,14 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
   try {
     switch (type) {
       case 'food_log':
-        // Handle batch processing (array of items)
-        const itemsToLog = Array.isArray(data) ? data : [data];
-        let totalCalories = 0;
-
-        for (const item of itemsToLog) {
-          await logFilteredFood(userId, db, item);
-          totalCalories += (item.calories || 0);
-        }
-
+        await logFilteredFood(userId, db, data);
         await sessionService.clearPendingAction(userId);
-
-        const confirmationMsg = itemsToLog.length === 1
-          ? `✅ Logged ${itemsToLog[0].food_name} (${itemsToLog[0].calories} cal)! Great choice! 🎉`
-          : `✅ Logged ${itemsToLog.length} items (${Math.round(totalCalories)} cal total)! Great choices! 🎉`;
-
         return {
           status: 'success',
-          message: confirmationMsg,
+          message: `✅ Logged ${data.food_name} (${data.calories} cal)! Great choice! 🎉`,
           response_type: 'food_logged',
           data: {
-            food_logged: itemsToLog
+            food_logged: data
           }
         };
       case 'recipe_log':

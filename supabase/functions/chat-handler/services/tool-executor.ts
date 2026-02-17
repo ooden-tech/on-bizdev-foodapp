@@ -147,11 +147,21 @@ export class ToolExecutor {
           return this.lookupNutrition(items[0], portions[0] || '1 serving');
         }
         // For multiple items, call NutritionAgent directly
-        return this.nutritionAgent.execute({ items, portions }, this.agentContext);
+        return this.nutritionAgent.execute({
+          items,
+          portions,
+          trackedNutrients: this.context.trackedNutrients || [],
+          originalDescription: args.items.join(', ')
+        }, this.agentContext);
       case 'compare':
         return this.compareFoods(items);
       default:
-        return this.nutritionAgent.execute({ items, portions }, this.agentContext);
+        return this.nutritionAgent.execute({
+          items,
+          portions,
+          trackedNutrients: this.context.trackedNutrients || [],
+          originalDescription: args.items.join(', ')
+        }, this.agentContext);
     }
   }
 
@@ -757,10 +767,16 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
   }
 
   async parseRecipeText(recipeText: string, recipeName?: string) {
+    // FIX: specific bug where recipeName becomes "String" string literal or object
+    let cleanName = recipeName;
+    if (typeof recipeName === 'string' && (recipeName === 'String' || recipeName === 'string' || recipeName === 'undefined')) {
+      cleanName = undefined;
+    }
+
     const result = await this.recipeAgent.execute({
       type: 'parse',
       text: recipeText,
-      recipeName
+      recipeName: cleanName
     }, this.agentContext);
     return result;
   }
@@ -786,6 +802,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
   // =============================================================
 
   async proposeFoodLog(data: any) {
+    console.log('[ToolExecutor] proposeFoodLog input:', JSON.stringify(data));
     const goals = await this.getUserGoals();
     let trackedKeys: string[] = ['calories', 'protein_g', 'carbs_g', 'fat_total_g'];
 
@@ -805,13 +822,24 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       error_sources: data.error_sources
     };
 
-    trackedKeys.forEach(key => {
+    // FIX: Always include standard nutrients even if not explicitly verified as a goal
+    const standardNutrients = [
+      'calories', 'protein_g', 'carbs_g', 'fat_total_g', 'hydration_ml',
+      'fiber_g', 'sugar_g', 'sodium_mg', 'cholesterol_mg', 'potassium_mg',
+      'fat_saturated_g', 'fat_trans_g', 'fat_mono_g', 'fat_poly_g'
+    ];
+
+    // Merge tracked keys with standard ones to ensure nothing is missed
+    const allKeys = Array.from(new Set([...trackedKeys, ...standardNutrients]));
+
+    allKeys.forEach(key => {
       const value = this.getNutrientValue(data, key);
 
       if (value !== undefined) {
         const numValue = typeof value === 'number' ? value : parseFloat(value);
         filteredData[key] = !isNaN(numValue) ? Math.round(numValue * 10) / 10 : 0;
-      } else {
+      } else if (trackedKeys.includes(key)) {
+        // Only default to 0 for explicitly tracked goals
         filteredData[key] = 0;
       }
     });

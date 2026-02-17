@@ -381,6 +381,10 @@
             type: "number",
             description: "Sodium in milligrams (optional)"
           },
+          hydration_ml: {
+            type: "number",
+            description: "Water content in milliliters (optional)"
+          },
           fat_saturated_g: {
             type: "number",
             description: "Saturated fat in grams (optional)"
@@ -448,6 +452,10 @@
           sodium_mg: {
             type: "number",
             description: "Sodium in milligrams"
+          },
+          hydration_ml: {
+            type: "number",
+            description: "Water content in milliliters"
           }
         },
         required: [

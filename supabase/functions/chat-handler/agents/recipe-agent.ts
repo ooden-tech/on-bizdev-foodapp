@@ -180,18 +180,19 @@ export class RecipeAgent {
           messages: [
             {
               role: "system",
+
               content: `Extract recipe details from the provided text. Return a JSON object:
 {
-  "recipe_name": "string",
-  "servings": number,
-  "total_batch_size": "string (optional)",
-  "serving_size": "string (optional)",
-  "ingredients": [ { "name": "string", "quantity": number, "unit": "string" } ],
-  "instructions": "string"
+  "recipe_name": "Extracted Name or Generated Name",
+  "servings": 4,
+  "total_batch_size": "Optional batch size",
+  "serving_size": "Optional serving size",
+  "ingredients": [ { "name": "Ingredient Name", "quantity": 1, "unit": "cup" } ],
+  "instructions": "Step-by-step instructions (if provided in text)"
 }
 - **NAME GENERATION**: If a name is provided in the text or by the user, use it.
 - **CRITICAL**: If NO name is found, **GENERATE a short, descriptive name** based on the ingredients (e.g., "Peanut Butter Banana Toast").
-- **NEVER** return "String", "Recipe", "Unknown", or "My Recipe".
+- **NEVER** return "String", "Recipe", "Unknown", "My Recipe", or just "string".
 - Default servings to 1.
 - Extract batch/serving sizes if mentioned.
 - ONLY include "instructions" if they were explicitly provided. DO NOT infer them.`
@@ -206,6 +207,21 @@ export class RecipeAgent {
         const content = response.choices[0].message.content;
         if (!content) throw new Error('Failed to parse recipe');
         const parsed = JSON.parse(content);
+
+        // FIX: Detect and replace generic/invalid names
+        const invalidNames = ['string', 'recipe', 'unknown', 'my recipe', 'custom recipe', 'food'];
+        if (!parsed.recipe_name || invalidNames.includes(parsed.recipe_name.toLowerCase())) {
+          // Fallback: Generate a name from the first 2 ingredients
+          const ingredients = parsed.ingredients || [];
+          if (ingredients.length > 0) {
+            const mainIngs = ingredients.slice(0, 2).map((i: any) => i.name).join(' and ');
+            parsed.recipe_name = `${mainIngs} (Recipe)`;
+          } else {
+            parsed.recipe_name = `Recipe ${new Date().toLocaleDateString()}`;
+          }
+          console.log(`[RecipeAgent] Fixed invalid recipe name: now "${parsed.recipe_name}"`);
+        }
+
         // Edge case: Zero ingredients parsed
         if (!parsed.ingredients || parsed.ingredients.length === 0) {
           return {

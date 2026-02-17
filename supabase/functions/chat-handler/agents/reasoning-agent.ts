@@ -12,6 +12,7 @@
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { toolDefinitions } from '../services/tools.ts';
 import { ToolExecutor } from '../services/tool-executor.ts';
+import { PipelineContext } from '../types.ts';
 
 const SYSTEM_PROMPT = `You are NutriPal's ReasoningAgent, the brain of an intelligent nutrition assistant.
 
@@ -20,10 +21,42 @@ const SYSTEM_PROMPT = `You are NutriPal's ReasoningAgent, the brain of an intell
    - **Goal Recall:** If the user asks "What are my goals?", you MUST list ALL active goals returned by the tool, including **micronutrients (vitamins, minerals)** and **water intake**. Do not summarize or omit them unless the user specifically asks for "macros only".
    - **Day Context Awareness:** You have access to 'dayClassification' (e.g., travel, sick, social). Use this to adjust your reasoning (e.g., be less strict on sodium during travel), but **DO NOT offer unsolicited advice** based on it unless the user asks.
 2. **Action Oriented (PCC Pattern):**
+   - **EFFICIENCY**: Call multiple tools in PARALLEL whenever possible.
+     - Example: Call 'get_user_goals', 'get_today_progress', and 'ask_nutrition_agent' in the SAME turn.
+     - DO NOT wait for 'get_user_goals' before calling 'ask_nutrition_agent'.
+     - DO NOT act like a chat bot that asks one question at a time. Be proactive.
+
    - If intent is LOGGING (log_food/log_recipe): Call 'propose_food_log' or 'propose_recipe_log'.
    - For recipes text: Call 'parse_recipe_text'.
    - **Crucial**: If the user is just ASKING (intent='query_nutrition' or 'compare'), provide the answer/comparison. Do NOT call 'propose_food_log' unless they specifically ask to log it.
-3. **Smart Comparisons:** If asked "should I have A or B" or "why is X different from Y", use 'ask_nutrition_agent' (or your own knowledge) to explain. Do NOT auto-log the items being compared.
+   
+   **SINGLE FOOD ITEM LOGGING WORKFLOW (MANDATORY):**
+   When the user wants to log a food item, follow this EXACT sequence:
+   1. Call 'get_user_goals', 'get_today_progress', AND 'ask_nutrition_agent' (lookup) ALL TOGETHER in the first turn.
+   2. Review the nutrition data returned:
+      - If health_flags contain 'CRITICAL', WARN the user but don't block
+      - If confidence is 'low', mention the uncertainty in your response
+   3. Call 'propose_food_log' with the nutrition data
+   4. NEVER skip steps. NEVER estimate nutrition yourself — always use ask_nutrition_agent.
+
+   **HYPOTHETICAL / WHAT-IF QUERIES:**
+   If the user says "If I eat..." or "What would happen if...", do NOT call propose_food_log.
+   Instead, call ask_nutrition_agent for the data, then REASON about the impact verbally.
+
+   **RECIPE WORKFLOWS:**
+   - If user pastes recipe text, call 'parse_recipe_text' with the text
+   - If user asks to log a saved recipe, call 'ask_recipe_agent' with action 'find'
+   - If multiple recipes found, list them and ask which one
+   - If user asks to save a recipe, call 'parse_recipe_text' then propose saving
+   - ALWAYS use the recipe name extracted from the text, never generate a type name
+
+   **AMBIGUITY HANDLING:**
+   If the intent metadata includes ambiguity_level 'high':
+   - **Partial Logging:** If the user requested multiple items and some are CLEAR while others are AMBIGUOUS, you SHOULD call 'propose_food_log' for the clear items immediately.
+   - **Clarification:** For the ambiguous items, ask 1-2 specific clarifying questions (size? type? preparation?) instead of trying to guess.
+   - Example: "Log 2 eggs and 200ml water" -> Log the water immediately, but ask about egg size.
+   
+   3. **Smart Comparisons:** If asked "should I have A or B" or "why is X different from Y", use 'ask_nutrition_agent' (or your own knowledge) to explain. Do NOT auto-log the items being compared.
 4. **Goal Management & Thresholds:**
    - If user wants to change nutrition goals, use 'bulk_update_user_goals' if setting multiple at once, or 'update_user_goal' for a single one.
    - You can specify thresholds: 'yellow_min' (e.g., 0.5), 'green_min' (e.g., 0.75), 'red_min' (e.g., 0.90).
@@ -71,7 +104,7 @@ export class ReasoningAgent {
   name = 'reasoning';
   openai = createOpenAIClient();
 
-  async execute(input: any, context: any) {
+  async execute(input: any, context: PipelineContext) {
     const { message, intent, chatHistory = [] } = input;
     const { userId, supabase, timezone, sessionId } = context;
 
@@ -84,7 +117,11 @@ export class ReasoningAgent {
       supabase,
       timezone,
       sessionId,
-      healthConstraints: context.healthConstraints
+      healthConstraints: context.healthConstraints,
+      userGoals: context.userGoals, // Feature 4: Pass goals
+      userProfile: context.userProfile, // Feature 4: Pass profile
+      dayClassification: context.dayClassification, // Feature 9: Pass day context
+      trackedNutrients: context.trackedNutrients // Feature 10: Pass tracked nutrients
     });
 
     // Build messages array
@@ -111,6 +148,15 @@ export class ReasoningAgent {
 
     if (intent) {
       contextPrefix += `[Intent: ${intent.type}${intent.entities?.length ? ` | Entities: ${intent.entities.join(', ')}` : ''}]`;
+      if (intent.food_items?.length) {
+        contextPrefix += ` [EXTRACTED ENTITIES: ${intent.food_items.join(', ')}]`;
+        if (intent.portions?.length) {
+          contextPrefix += ` [PORTIONS: ${intent.portions.join(', ')}]`;
+        }
+      }
+      if (intent.ambiguity_level === 'high' || intent.ambiguity_level === 'medium') {
+        contextPrefix += ` [AMBIGUITY: ${intent.ambiguity_level} — ${intent.ambiguity_reasons?.join('; ')}]`;
+      }
     }
 
     if (pendingAction) {
@@ -167,7 +213,18 @@ export class ReasoningAgent {
 
         try {
           const result = await toolExecutor.execute(toolName, args);
-          gatheredData[toolName] = result;
+
+          // FIX: Don't overwrite if tool called multiple times (e.g. multiple food logs)
+          if (gatheredData[toolName]) {
+            if (Array.isArray(gatheredData[toolName])) {
+              gatheredData[toolName].push(result);
+            } else {
+              gatheredData[toolName] = [gatheredData[toolName], result];
+            }
+          } else {
+            gatheredData[toolName] = result;
+          }
+
           console.log(`[ReasoningAgent] Tool ${toolName} result:`, JSON.stringify(result).slice(0, 200));
 
           // Add tool result
@@ -207,19 +264,51 @@ export class ReasoningAgent {
 
     // Check for any proposals in gathered data
     let proposal = undefined;
-    for (const [_toolName, result] of Object.entries(gatheredData)) {
+
+    // Flatten results to handle arrays from multiple calls
+    const allResults = Object.values(gatheredData).flat();
+
+    // Collect specific proposals
+    const foodLogProposals: any[] = [];
+
+    for (const result of allResults) {
       if (result?.proposal_type && result?.pending) {
-        // Preserve flowState if present at root or in data
-        const proposalData = result.data || {};
-        if (result.flowState && !proposalData.flowState) {
-          proposalData.flowState = result.flowState;
+        if (result.proposal_type === 'food_log') {
+          foodLogProposals.push(result);
+        } else {
+          // For other types, just take the first one found (usually only one goal update/recipe log at a time)
+          const proposalData = result.data || {};
+          if (result.flowState && !proposalData.flowState) {
+            proposalData.flowState = result.flowState;
+          }
+          proposal = {
+            type: result.proposal_type,
+            id: result.proposal_id || result.id || `prop_${Date.now()}`,
+            data: proposalData
+          };
+          // If we found a non-food proposal, we favor that (rare to mix types)
+          // But strict logic: prioritize food logs if present?
         }
+      }
+    }
+
+    // Handle Food Log Batching
+    if (foodLogProposals.length > 0) {
+      if (foodLogProposals.length === 1) {
+        // Single item - standard behavior
         proposal = {
-          type: result.proposal_type,
-          id: result.proposal_id || result.id || `prop_${Date.now()}`,
-          data: proposalData
+          type: 'food_log',
+          id: foodLogProposals[0].proposal_id,
+          data: foodLogProposals[0].data
         };
-        break;
+      } else {
+        // Multiple items - bundle them!
+        // Orchestrator needs to handle this by accepting an array in data.
+        proposal = {
+          type: 'food_log',
+          id: `batch_${Date.now()}`,
+          data: foodLogProposals.map(p => p.data) // Array of food data objects
+        };
       }
     }
 
