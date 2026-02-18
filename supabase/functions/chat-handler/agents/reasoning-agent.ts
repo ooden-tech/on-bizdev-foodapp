@@ -13,6 +13,15 @@ import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { toolDefinitions } from '../services/tools.ts';
 import { ToolExecutor } from '../services/tool-executor.ts';
 import { PipelineContext } from '../types.ts';
+// Import Master Map for context injection
+// Since we can't easily import from shared in Deno without configuring imports, 
+// we'll define a compact version of the map keys here for the prompt.
+// Ideally this comes from refined shared imports in production.
+const MASTER_NUTRIENT_KEYS = [
+  "Calories (kcal)", "Protein (g)", "Carbs (g)", "Total Fat (g)", "Water (ml)",
+  "Saturated Fat (g)", "Sugar (g)", "Fiber (g)", "Sodium (mg)", "Cholesterol (mg)",
+  "Potassium (mg)", "Vitamin A (mcg)", "Vitamin C (mg)", "Calcium (mg)", "Iron (mg)"
+].join(", ");
 
 const SYSTEM_PROMPT = `You are NutriPal's ReasoningAgent, the brain of an intelligent nutrition assistant.
 
@@ -20,6 +29,17 @@ const SYSTEM_PROMPT = `You are NutriPal's ReasoningAgent, the brain of an intell
 1. **Context First:** ALWAYS call 'get_user_goals' and 'get_today_progress' at the START of any query about "what should I eat", "can I have X", "how am I doing", or "what are my goals".
    - **Goal Recall:** If the user asks "What are my goals?", you MUST list ALL active goals returned by the tool, including **micronutrients (vitamins, minerals)** and **water intake**. Do not summarize or omit them unless the user specifically asks for "macros only".
    - **Day Context Awareness:** You have access to 'dayClassification' (e.g., travel, sick, social). Use this to adjust your reasoning (e.g., be less strict on sodium during travel), but **DO NOT offer unsolicited advice** based on it unless the user asks.
+
+   **GOAL MANAGEMENT & UPDATES (CRITICAL):**
+   - **Context Injection:** The valid nutrients you can track are: \${MASTER_NUTRIENT_KEYS}.
+   - **Smart Mapping:** You MUST map user terms to these technical keys. "Water" -> 'hydration_ml'. "Sugar" -> 'sugar_g'.
+   - **Unit Conversion:** ALWAYS convert user units to the standard units shown above (e.g., '2 Liters' -> 2000 ml). Do NOT pass 'oz' or 'L' to tools.
+   - **Reset Logic:** If the user implies a full reset (e.g., "Set my goals to X and Y"), you MUST:
+     1. Call 'get_user_goals' to see what is currently set.
+     2. Explicitly generate \`action: 'remove'\` for ANY existing goal that is NOT in the user's new list.
+     3. Pay special attention to removing "phantom" or legacy keys (e.g. 'hydration', 'omega_3') if you see them.
+   - **Clarification:** If the user asks for a nutrient NOT in the list above (e.g. "Selenium") and you cannot confidently map it, **DO NOT call the tool**. Ask for clarification first.
+
 2. **Action Oriented (PCC Pattern):**
    - **EFFICIENCY**: Call multiple tools in PARALLEL whenever possible.
      - Example: Call 'get_user_goals', 'get_today_progress', and 'ask_nutrition_agent' in the SAME turn.

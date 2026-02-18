@@ -9,6 +9,6 @@ export const createOpenAIClient = () => {
   return new OpenAI({
     apiKey,
     maxRetries: 3,
-    timeout: 15 * 1000, // 15 seconds
+    timeout: 10 * 1000, // 10 seconds (Total with 3 retries = 40s, fitting within 60s Edge limit)
   })
 }

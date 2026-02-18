@@ -3,6 +3,7 @@ import { lookupNutrition } from '../../_shared/nutrition-lookup.ts';
 import { createAdminClient } from '../../_shared/supabase-client.ts';
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { normalizeFoodName } from '../../_shared/utils.ts';
+import { MASTER_NUTRIENT_MAP } from '../../_shared/nutrient-validation.ts';
 // Fallback nutrition data for common ingredients (per 100g unless specified)
 const NUTRITION_FALLBACKS = {};
 // Modifiers to remove for loose matching
@@ -358,27 +359,7 @@ export function scaleNutrition(data, multiplier) {
   const scaled = {
     ...data
   };
-  const keysToScale = [
-    'calories',
-    'protein_g',
-    'fat_total_g',
-    'carbs_g',
-    'fiber_g',
-    'sugar_g',
-    'sodium_mg',
-    'fat_saturated_g',
-    'cholesterol_mg',
-    'potassium_mg',
-    'fat_trans_g',
-    'calcium_mg',
-    'iron_mg',
-    'magnesium_mg',
-    'vitamin_a_mcg',
-    'vitamin_c_mg',
-    'vitamin_d_mcg',
-    'sugar_added_g',
-    'hydration_ml'
-  ];
+  const keysToScale = Object.keys(MASTER_NUTRIENT_MAP);
 
   if (multiplier !== 1) {
     keysToScale.forEach((key) => {
@@ -558,6 +539,7 @@ export class NutritionAgent {
           "sodium_mg": number,
           "hydration_ml": number, // Estimated water content
           // ... INCLUDE ALL TRACKED NUTRIENTS HERE (e.g. "vitamin_c_mg": 12, "selenium_mcg": 5)
+          // Supported keys: ${Object.keys(MASTER_NUTRIENT_MAP).join(', ')}
           "confidence": "high" | "medium" | "low",
           "health_flags": string[], 
           "is_missing_item": boolean

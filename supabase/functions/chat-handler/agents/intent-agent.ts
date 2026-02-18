@@ -105,21 +105,39 @@ export class IntentAgent {
         role: "system",
         content: SYSTEM_PROMPT
       },
-      ...history.slice(-5),
+      ...history.map((msg: any) => ({
+        role: msg.role,
+        content: (msg.content || '').length > 2000 ? (msg.content || '').substring(0, 2000) + '... [Truncated]' : (msg.content || '')
+      })).slice(-5),
       {
         role: "user",
-        content: message
+        content: message.length > 2000 ? message.substring(0, 2000) + "... [Truncated]" : message
       }
     ];
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: messages,
-      response_format: {
-        type: "json_object"
-      }
-    });
-    const content = response.choices[0].message.content;
-    if (!content) throw new Error("No content from OpenAI");
-    return JSON.parse(content);
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: messages,
+        response_format: {
+          type: "json_object"
+        },
+        timeout: 5000 // Force 5s timeout for Intent (fast fail)
+      });
+      const content = response.choices[0].message.content;
+      if (!content) throw new Error("No content from OpenAI");
+      return JSON.parse(content);
+    } catch (error) {
+      console.error('[IntentAgent] Execution Error (Returning Fallback):', error);
+      // Fallback: Return a generic intent that falls through to ReasoningAgent (Step 4)
+      // This allows the smarter gpt-4o to handle complex requests that timed out the mini model
+      return {
+        intent: "complex_request",
+        confidence: "low",
+        ambiguity_level: "none",
+        ambiguity_reasons: ["fallback_from_timeout"],
+        notes: "IntentAgent timed out. Escalating to ReasoningAgent."
+      };
+    }
   }
 }

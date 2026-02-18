@@ -579,17 +579,8 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
   // We need to know which keys are EXPLICIT database columns vs. extras
   // For now, we'll assume anything not in the standard FoodLogEntry interface is an extra
   // But wait, I added 40+ columns. I should check against a known list.
-  const schemaColumns = [
-    'protein_g', 'carbs_g', 'fat_total_g', 'hydration_ml', 'fat_saturated_g',
-    'fat_poly_g', 'fat_mono_g', 'fat_trans_g', 'omega_3_g', 'omega_6_g',
-    'omega_ratio', 'fiber_g', 'fiber_soluble_g', 'sugar_g', 'sugar_added_g',
-    'cholesterol_mg', 'sodium_mg', 'potassium_mg', 'calcium_mg', 'iron_mg',
-    'magnesium_mg', 'phosphorus_mg', 'zinc_mg', 'copper_mg', 'manganese_mg',
-    'selenium_mcg', 'vitamin_a_mcg', 'vitamin_c_mg', 'vitamin_d_mcg',
-    'vitamin_e_mg', 'vitamin_k_mcg', 'thiamin_mg', 'riboflavin_mg',
-    'niacin_mg', 'pantothenic_acid_mg', 'vitamin_b6_mg', 'biotin_mcg',
-    'folate_mcg', 'vitamin_b12_mcg'
-  ];
+  // FIX: Use MASTER_NUTRIENT_MAP for schema columns to ensure single source of truth
+  const schemaColumns = Object.keys(MASTER_NUTRIENT_MAP);
 
   // FIX: Iterate over keys present in nutritionData, not just tracked keys
   // This ensures we capture everything the AI gave us that fits in the DB.

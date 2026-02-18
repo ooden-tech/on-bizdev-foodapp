@@ -972,7 +972,9 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     if (k.includes('sugar')) return 'sugar_g';
     if (k.includes('sodium')) return 'sodium_mg';
 
-    return k.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    // STRICT FIX: Return null if no match found. 
+    // Do NOT return sanitized garbage.
+    return null as any;
   }
 
   async updateUserGoal(nutrient: string, targetValue: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', action: 'set' | 'remove' = 'set', thresholds: any = {}) {
@@ -1038,9 +1040,18 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
   async bulkUpdateUserGoals(goals: any[]) {
     const proposalId = `bulk_goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const invalidGoals: string[] = [];
 
     const processedGoals = goals.map(g => {
+      // Validate key
       const normalizedNutrient = this.normalizeNutrientName(g.nutrient);
+
+      // STRICT FIX: If null (not found), reject it.
+      if (!normalizedNutrient) {
+        invalidGoals.push(g.nutrient);
+        return null;
+      }
+
       const defaultUnit = normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g';
 
       const thresholds: any = {};
@@ -1050,14 +1061,35 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
       return {
         nutrient: normalizedNutrient,
-        target_value: g.target_value, // Use explicit naming
-        value: g.target_value, // Keep legacy for safety
+        target_value: g.target_value,
+        value: g.target_value,
         unit: g.unit || defaultUnit,
         goal_type: g.goal_type || 'goal',
         action: g.action || 'set',
         ...thresholds
       };
-    });
+    }).filter(g => g !== null);
+
+    // If we have invalid goals, reject the proposal and ask AI to clarify
+    if (invalidGoals.length > 0) {
+      return {
+        error: true,
+        message: `I couldn't identify these nutrients: ${invalidGoals.join(', ')}. Please clarify if you meant something else (e.g. 'Water' instead of 'hydration').`
+      };
+    }
+
+    // Build confirmation message
+    const sets = processedGoals.filter(g => g.action !== 'remove');
+    const removes = processedGoals.filter(g => g.action === 'remove');
+
+    let msg = "Ready to update goals:\n";
+    if (sets.length > 0) {
+      msg += `✅ Setting: ${sets.map(g => `${this.getHumanName(g.nutrient)} (${g.target_value} ${g.unit})`).join(', ')}\n`;
+    }
+    if (removes.length > 0) {
+      msg += `🗑️ Removing: ${removes.map(g => this.getHumanName(g.nutrient)).join(', ')}`;
+    }
+    if (sets.length === 0 && removes.length === 0) msg = "No changes detected.";
 
     return {
       proposal_type: 'bulk_goal_update',
@@ -1066,8 +1098,14 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       data: {
         goals: processedGoals
       },
-      message: `Ready to update ${processedGoals.length} nutrition goals. Please confirm.`
+      message: msg.trim()
     };
+  }
+
+  private getHumanName(key: string): string {
+    if (key === 'calories') return 'Calories';
+    const info = MASTER_NUTRIENT_MAP[key];
+    return info ? info.name : key;
   }
 
   async applyDailyWorkoutOffset(value: number, nutrient: string = 'calories', notes?: string) {
