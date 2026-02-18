@@ -936,44 +936,14 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
    * Helper to normalize nutrient names to technical column names
    */
   private normalizeNutrientName(name: string): string {
-    // Use shared normalization logic
-    // We can't import directly in Deno Supabase functions easily without Deno setup, 
-    // but assuming shared is available or we duplicate logic for now (safest for Deno function if no shared build step).
-    // Given the user constraint "don't hardcode a lot", we ideally use shared. 
-    // BUT Deno functions usually need direct URL imports or mapped imports.
-    // For now, I will use the SAME logic as the shared file to ensure consistency, 
-    // as setting up shared imports in Supabase Edge Functions often requires import_map.json changes.
-    // I will verify import_map later.
+    // Call the shared normalization logic from nutrient-validation.ts
+    const normalized = normalizeNutrientKey(name);
 
-    // Attempting to match shared/nutrients.ts logic:
-    const k = name.toLowerCase().trim();
-    if (k === 'calories' || k === 'kcal' || k === 'energy') return 'calories';
-    if (k === 'protein') return 'protein_g';
-    if (k === 'carbs' || k === 'carbohydrates') return 'carbs_g';
-    if (k === 'fat') return 'fat_total_g';
-
-    // Master Map lookup
-    const map = MASTER_NUTRIENT_MAP;
-    const cleanK = k.replace(/[_ ]/g, '');
-    for (const [masterKey, i] of Object.entries(map)) {
-      const info = i as NutrientInfo;
-      if (k === masterKey) return masterKey;
-      if (k === info.name.toLowerCase()) return masterKey;
-      // Fuzzy name match (e.g. "vitamin_a" matches "Vitamin A")
-      if (cleanK === info.name.toLowerCase().replace(/[_ ]/g, '')) return masterKey;
+    // Validate that it actually exists in our master map
+    if (MASTER_NUTRIENT_MAP[normalized] || normalized === 'calories') {
+      return normalized;
     }
 
-    // Fallbacks
-    if (k.includes('protein')) return 'protein_g';
-    if (k.includes('carb')) return 'carbs_g';
-    if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
-    if (k.includes('fat') && !k.includes('total')) return 'fat_total_g';
-    if (k.includes('fiber')) return 'fiber_g';
-    if (k.includes('sugar')) return 'sugar_g';
-    if (k.includes('sodium')) return 'sodium_mg';
-
-    // STRICT FIX: Return null if no match found. 
-    // Do NOT return sanitized garbage.
     return null as any;
   }
 

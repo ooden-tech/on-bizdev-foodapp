@@ -1107,19 +1107,14 @@ Return JSON with: { patterns: string[], insights: string[], suggestions: string[
   }
 
   private normalizeNutrientName(name: string): string {
-    const k = name.toLowerCase().trim();
-    if (k === 'calories' || k === 'kcal' || k === 'energy') return 'calories';
-    if (k === 'protein') return 'protein_g';
-    if (k === 'carbs' || k === 'carbohydrates') return 'carbs_g';
-    if (k === 'fat') return 'fat_total_g';
+    // Call the shared normalization logic from nutrients.ts
+    const normalized = normalizeNutrientKey(name);
 
-    const map = MASTER_NUTRIENT_MAP;
-    for (const [masterKey, i] of Object.entries(map)) {
-      if (k === masterKey) return masterKey;
-      const info = i as any;
-      if (k === info.name.toLowerCase()) return masterKey;
-      if (info.aliases?.includes(k)) return masterKey;
+    // Validate that it actually exists in our master map
+    if (MASTER_NUTRIENT_MAP[normalized] || normalized === 'calories') {
+      return normalized;
     }
-    return normalizeNutrientKey(name);
+
+    return null as any;
   }
 }

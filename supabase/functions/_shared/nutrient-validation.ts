@@ -201,19 +201,29 @@ export const normalizeNutrientKey = (key: string): string => {
     if (k === 'carbs' || k === 'carbohydrates') return 'carbs_g';
     if (k === 'fat') return 'fat_total_g';
 
-    // Dynamic lookup
+    // 1. Exact matches / name-based matches
     for (const [masterKey, info] of Object.entries(MASTER_NUTRIENT_MAP)) {
         if (k === masterKey) return masterKey;
         if (k === info.name.toLowerCase()) return masterKey;
+
+        // Handle "Omega-3" vs "Omega-3 Fatty Acids"
+        if (info.name.toLowerCase().includes(k) && k.length > 4) return masterKey;
     }
 
-    // Fallback for suffixes
+    // 2. Fallback for suffixes & common patterns
     if (k.includes('protein')) return 'protein_g';
     if (k.includes('carb')) return 'carbs_g';
     if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
-    if (k.includes('fat') && !k.includes('total')) return 'fat_total_g'; // Default "Fat" to Total Fat
+    if (k.includes('fat') && k.includes('poly')) return 'fat_poly_g';
+    if (k.includes('fat') && k.includes('mono')) return 'fat_mono_g';
+    if (k.includes('fat') && !k.includes('total')) return 'fat_total_g';
     if (k.includes('fiber')) return 'fiber_g';
     if (k.includes('sugar')) return 'sugar_g';
+    if (k.includes('sodium')) return 'sodium_mg';
+
+    // 3. Omega specific fallback if above fails
+    if (k.includes('omega') && k.includes('3')) return 'omega_3_g';
+    if (k.includes('omega') && k.includes('6')) return 'omega_6_g';
 
     return key.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
 };
