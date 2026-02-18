@@ -845,11 +845,15 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
           }
         };
       case 'goal_update':
-        await db.updateUserGoal(userId, data.nutrient, data.target_value, data.unit);
+        await db.updateUserGoal(userId, data.nutrient, data.target_value, data.unit, data.goal_type, {
+          yellow_min: data.yellow_min,
+          green_min: data.green_min,
+          red_min: data.red_min
+        });
         await sessionService.clearPendingAction(userId);
         return {
           status: 'success',
-          message: `✅ Updated your ${data.nutrient} goal to ${data.target_value}${data.unit}! 🎯`,
+          message: `✅ Updated your ${data.nutrient} goal to ${data.target_value}${data.unit}${data.goal_type === 'limit' ? ' (Limit)' : ''}! 🎯`,
           response_type: 'goal_updated',
           data: {
             goal_updated: data

@@ -454,7 +454,7 @@
         properties: {
           nutrient: {
             type: "string",
-            description: "The nutrient (calories, protein, carbs, fat, fiber, sugar, sodium)"
+            description: "The technical nutrient key (e.g., 'calories', 'protein_g', 'fat_saturated_g', 'hydration_ml')."
           },
           target_value: {
             type: "number",
@@ -462,7 +462,12 @@
           },
           unit: {
             type: "string",
-            description: "The unit (kcal for calories, g for macros, mg for sodium)"
+            description: "The unit (kcal for calories, g for macros, ml for water, mg for sodium)"
+          },
+          goal_type: {
+            type: "string",
+            enum: ["goal", "limit"],
+            description: "Whether the target is a 'goal' (hit or exceed) or a 'limit' (stay under). Saturated fat, sugar, sodium, etc. are typically limits."
           },
           yellow_min: {
             type: "number",
@@ -478,8 +483,7 @@
           }
         },
         required: [
-          "nutrient",
-          "target_value"
+          "nutrient"
         ]
       }
     }
@@ -520,6 +524,25 @@
         type: "object",
         properties: {},
         required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_user_goal",
+      description: "Deletes a specific nutrition goal or target. Use this when the user wants to stop tracking a nutrient.",
+      parameters: {
+        type: "object",
+        properties: {
+          nutrient: {
+            type: "string",
+            description: "The nutrient to stop tracking (e.g., 'sugar', 'saturated fat')"
+          }
+        },
+        required: [
+          "nutrient"
+        ]
       }
     }
   },

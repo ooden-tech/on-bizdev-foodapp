@@ -977,9 +977,15 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     return null as any;
   }
 
-  async updateUserGoal(nutrient: string, targetValue: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', action: 'set' | 'remove' = 'set', thresholds: any = {}) {
-    const proposalId = `goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  async updateUserGoal(nutrient: string, targetValue?: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', action: 'set' | 'remove' = 'set', thresholds: any = {}) {
     const normalizedNutrient = this.normalizeNutrientName(nutrient);
+    if (!normalizedNutrient) {
+      return {
+        error: true,
+        message: `I couldn't identify the nutrient "${nutrient}". Please use standard names like calories, protein, carbs, or fat.`
+      };
+    }
+
     const map = MASTER_NUTRIENT_MAP;
     const nutrientInfo = map[normalizedNutrient];
 
@@ -992,35 +998,59 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       };
     }
 
-    const officialName = nutrientInfo ? nutrientInfo.name : 'Calories';
-    const defaultUnit = nutrientInfo ? nutrientInfo.unit : 'kcal';
-
-    // Fetch current goals to give smart context
-    const currentGoals = await this.getUserGoals();
-    const isAlreadyTracked = currentGoals[normalizedNutrient] !== undefined;
-    const oldTarget = isAlreadyTracked ? currentGoals[normalizedNutrient].target : null;
-    const oldType = isAlreadyTracked ? (currentGoals[normalizedNutrient].goal_type || 'goal') : 'goal';
-
-    let message = '';
-    const typeLabel = goalType === 'limit' ? 'limit' : 'goal';
-
     if (action === 'remove') {
-      message = `Remove your **${officialName}** goal?`;
-    } else if (isAlreadyTracked) {
-      if (oldType !== goalType) {
-        message = `Change your **${officialName}** from a ${oldType} of ${oldTarget}${defaultUnit} to a **${typeLabel}** of ${targetValue}${unit || defaultUnit}?`;
-      } else {
-        message = `Update your **${officialName}** ${typeLabel} from ${oldTarget}${defaultUnit} to ${targetValue}${unit || defaultUnit}?`;
-      }
-    } else {
-      message = `Start tracking **${officialName}** with a ${typeLabel} of ${targetValue}${unit || defaultUnit}?`;
+      return {
+        proposal_type: 'goal_update',
+        proposal_id: `goal_rem_${Date.now()}`,
+        pending: true,
+        data: {
+          nutrient: normalizedNutrient,
+          action: 'remove'
+        },
+        message: `Are you sure you want to stop tracking your **${this.getHumanName(normalizedNutrient)}** goal?`
+      };
     }
 
-    // Clean up thresholds (remove undefined)
+    // Fetch existing goals to fill in missing values
+    const currentGoals = await this.getUserGoals();
+    const existingGoal = (currentGoals as any)[normalizedNutrient];
+
+    let finalValue = targetValue;
+    let finalUnit = unit;
+
+    // Merge logic for missing values
+    if (finalValue === undefined || finalValue === null) {
+      if (existingGoal) {
+        finalValue = existingGoal.target;
+      } else {
+        return {
+          error: true,
+          message: `Please specify a target value for your new ${this.getHumanName(normalizedNutrient)} goal.`
+        };
+      }
+    }
+
+    if (!finalUnit) {
+      finalUnit = existingGoal?.unit || (normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g');
+    }
+
     const cleanedThresholds: any = {};
     if (thresholds.yellow_min !== undefined) cleanedThresholds.yellow_min = thresholds.yellow_min;
     if (thresholds.green_min !== undefined) cleanedThresholds.green_min = thresholds.green_min;
     if (thresholds.red_min !== undefined) cleanedThresholds.red_min = thresholds.red_min;
+
+    const proposalId = `goal_${Date.now()}`;
+    const humanName = this.getHumanName(normalizedNutrient);
+    const typeLabel = goalType === 'limit' ? 'limit' : 'goal';
+
+    let message = `Ready to set your **${humanName}** ${typeLabel} to ${finalValue}${finalUnit}.`;
+    if (existingGoal) {
+      if (existingGoal.target !== finalValue || existingGoal.goal_type !== goalType) {
+        message = `Update your **${humanName}** from its current ${existingGoal.goal_type || 'goal'} (${existingGoal.target}${existingGoal.unit}) to a **${typeLabel}** of ${finalValue}${finalUnit}?`;
+      } else {
+        message = `Your **${humanName}** is already set to a ${typeLabel} of ${finalValue}${finalUnit}. Update thresholds?`;
+      }
+    }
 
     return {
       proposal_type: 'goal_update',
@@ -1028,10 +1058,10 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       pending: true,
       data: {
         nutrient: normalizedNutrient,
-        target_value: targetValue,
-        unit: unit || defaultUnit,
+        target_value: finalValue,
+        unit: finalUnit,
         goal_type: goalType,
-        action: action,
+        action: 'set',
         ...cleanedThresholds
       },
       message: message + (Object.keys(cleanedThresholds).length ? ' (with custom color thresholds)' : '')
@@ -1039,19 +1069,36 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
   }
 
   async bulkUpdateUserGoals(goals: any[]) {
-    const proposalId = `bulk_goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const proposalId = `bulk_goal_${Date.now()}`;
     const invalidGoals: string[] = [];
+    const currentGoals = await this.getUserGoals();
 
     const processedGoals = goals.map(g => {
-      // Validate key
       const normalizedNutrient = this.normalizeNutrientName(g.nutrient);
-
-      // STRICT FIX: If null (not found), reject it.
       if (!normalizedNutrient) {
         invalidGoals.push(g.nutrient);
         return null;
       }
 
+      const existingGoal = (currentGoals as any)[normalizedNutrient];
+
+      let finalValue = g.target_value;
+      if (finalValue === undefined || finalValue === null) {
+        finalValue = g.value; // AI sometimes uses .value
+      }
+
+      // Merge logic
+      if ((finalValue === undefined || finalValue === null) && g.action !== 'remove') {
+        if (existingGoal) {
+          finalValue = existingGoal.target;
+        } else {
+          const humanName = this.getHumanName(normalizedNutrient);
+          invalidGoals.push(`${humanName} (missing value)`);
+          return null;
+        }
+      }
+
+      const humanName = this.getHumanName(normalizedNutrient);
       const defaultUnit = normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g';
 
       const thresholds: any = {};
@@ -1061,35 +1108,27 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
       return {
         nutrient: normalizedNutrient,
-        target_value: g.target_value,
-        value: g.target_value,
-        unit: g.unit || defaultUnit,
-        goal_type: g.goal_type || 'goal',
+        target_value: finalValue,
+        unit: g.unit || existingGoal?.unit || defaultUnit,
+        goal_type: g.goal_type || existingGoal?.goal_type || 'goal',
         action: g.action || 'set',
         ...thresholds
       };
     }).filter(g => g !== null);
 
-    // If we have invalid goals, reject the proposal and ask AI to clarify
     if (invalidGoals.length > 0) {
       return {
         error: true,
-        message: `I couldn't identify these nutrients: ${invalidGoals.join(', ')}. Please clarify if you meant something else (e.g. 'Water' instead of 'hydration').`
+        message: `I encountered issues with: ${invalidGoals.join(', ')}. Please specify target values for new goals.`
       };
     }
 
-    // Build confirmation message
-    const sets = processedGoals.filter(g => g.action !== 'remove');
-    const removes = processedGoals.filter(g => g.action === 'remove');
-
-    let msg = "Ready to update goals:\n";
-    if (sets.length > 0) {
-      msg += `✅ Setting: ${sets.map(g => `${this.getHumanName(g.nutrient)} (${g.target_value} ${g.unit})`).join(', ')}\n`;
-    }
-    if (removes.length > 0) {
-      msg += `🗑️ Removing: ${removes.map(g => this.getHumanName(g.nutrient)).join(', ')}`;
-    }
-    if (sets.length === 0 && removes.length === 0) msg = "No changes detected.";
+    const removedCount = processedGoals.filter(g => g.action === 'remove').length;
+    const updatedCount = processedGoals.length - removedCount;
+    let summary = `Ready to process ${processedGoals.length} goal updates.`;
+    if (removedCount > 0 && updatedCount > 0) summary = `I'll update ${updatedCount} goals and remove ${removedCount} others.`;
+    else if (removedCount > 0) summary = `I'll remove ${removedCount} of your tracking goals.`;
+    else summary = `I'll update targets for ${updatedCount} of your goals.`;
 
     return {
       proposal_type: 'bulk_goal_update',
@@ -1098,7 +1137,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       data: {
         goals: processedGoals
       },
-      message: msg.trim()
+      message: summary
     };
   }
 

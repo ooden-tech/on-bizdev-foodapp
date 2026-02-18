@@ -34,11 +34,21 @@ export const formatMilligram = (mg: number | null | undefined): string => {
   return `${formatNumber(mg, 0)} mg`;
 };
 
+import { MASTER_NUTRIENT_MAP } from 'shared';
+
 // Example for nutrient display names (if needed elsewhere)
 export const formatNutrientName = (key: string): string => {
-  // Special cases
-  if (key === 'hydration_ml') return 'Water';
+  const normalizedKey = key.toLowerCase().trim();
 
+  // 1. Check Master Map (Source of Truth)
+  if (MASTER_NUTRIENT_MAP[normalizedKey]) {
+    return MASTER_NUTRIENT_MAP[normalizedKey].name;
+  }
+
+  // Special cases for legacy or special aliases
+  if (normalizedKey === 'hydration_ml') return 'Water';
+
+  // 2. Fallback to formatting
   return key.replace(/_/g, ' ')
     .replace(/\b\w/g, l => l.toUpperCase())
     .replace(/ G$/, ' (g)')

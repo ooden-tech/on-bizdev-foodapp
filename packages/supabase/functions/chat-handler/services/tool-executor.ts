@@ -11,6 +11,7 @@ import { InsightAgent } from '../agents/insight-agent.ts';
 import { ValidatorAgent } from '../agents/validator-agent.ts';
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { getStartAndEndOfDay, getDateRange } from '../../_shared/utils.ts';
+import { MASTER_NUTRIENT_MAP, normalizeNutrientKey } from '../../_shared/nutrients.ts';
 
 export class ToolExecutor {
   context: any;
@@ -81,11 +82,13 @@ export class ToolExecutor {
           return this.confirmPendingLog(args.proposal_id);
         // Goal Tools
         case 'update_user_goal':
-          return this.updateUserGoal(args.nutrient, args.target_value, args.unit, {
+          return this.updateUserGoal(args.nutrient, args.target_value, args.unit, args.goal_type, {
             yellow_min: args.yellow_min,
             green_min: args.green_min,
             red_min: args.red_min
           });
+        case 'delete_user_goal':
+          return this.deleteUserGoal(args.nutrient);
         case 'apply_daily_workout_offset':
           return this.applyDailyWorkoutOffset(args.adjustment_value, args.nutrient, args.notes);
         case 'calculate_recommended_goals':
@@ -158,11 +161,11 @@ export class ToolExecutor {
     const { start, end } = getStartAndEndOfDay(new Date(), timezone);
     const [logs, adjustments] = await Promise.all([
       this.db.getFoodLogs(this.context.userId, start, end),
-      this.db.getDailyAdjustments(this.context.userId, start.split('T')[0], end.split('T')[0])
+      this.db.getDailyAdjustments(this.context.userId, start.split('T')[0])
     ]);
 
     // Dynamically accumulate any nutrient found in NUTRIENT_MAP
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
     const totals: Record<string, number> = {
       calories: 0,
       items_logged: 0
@@ -281,7 +284,7 @@ export class ToolExecutor {
 
     if (typeof goals === 'object' && !(goals as any).message) {
       // Get technical names for all user goals
-      trackedNutrients = Object.keys(goals).map(key => this.normalizeNutrientName(key));
+      trackedNutrients = Object.keys(goals).map(key => normalizeNutrientKey(key));
     }
 
     // Feature 2: Delegate to NutritionAgent FIRST (Cache -> API -> LLM fallback internal to agent)
@@ -346,60 +349,17 @@ export class ToolExecutor {
     return estimate;
   }
 
-  private getMasterNutrientMap(): Record<string, { name: string, unit: string }> {
-    return {
-      calories: { name: "Calories", unit: "kcal" },
-      protein_g: { name: "Protein", unit: "g" },
-      fat_total_g: { name: "Total Fat", unit: "g" },
-      carbs_g: { name: "Carbohydrates", unit: "g" },
-      hydration_ml: { name: "Water", unit: "ml" },
-      fat_saturated_g: { name: "Saturated Fat", unit: "g" },
-      fat_poly_g: { name: "Polyunsaturated Fat", unit: "g" },
-      fat_mono_g: { name: "Monounsaturated Fat", unit: "g" },
-      fat_trans_g: { name: "Trans Fat", unit: "g" },
-      omega_3_g: { name: "Omega-3 Fatty Acids", unit: "g" },
-      omega_6_g: { name: "Omega-6 Fatty Acids", unit: "g" },
-      omega_ratio: { name: "Omega 6:3 Ratio", unit: "" },
-      fiber_g: { name: "Dietary Fiber", unit: "g" },
-      fiber_soluble_g: { name: "Soluble Fiber", unit: "g" },
-      sugar_g: { name: "Total Sugars", unit: "g" },
-      sugar_added_g: { name: "Added Sugars", unit: "g" },
-      cholesterol_mg: { name: "Cholesterol", unit: "mg" },
-      sodium_mg: { name: "Sodium", unit: "mg" },
-      potassium_mg: { name: "Potassium", unit: "mg" },
-      calcium_mg: { name: "Calcium", unit: "mg" },
-      iron_mg: { name: "Iron", unit: "mg" },
-      magnesium_mg: { name: "Magnesium", unit: "mg" },
-      phosphorus_mg: { name: "Phosphorus", unit: "mg" },
-      zinc_mg: { name: "Zinc", unit: "mg" },
-      copper_mg: { name: "Copper", unit: "mg" },
-      manganese_mg: { name: "Manganese", unit: "mg" },
-      selenium_mcg: { name: "Selenium", unit: "mcg" },
-      vitamin_a_mcg: { name: "Vitamin A", unit: "mcg" },
-      vitamin_c_mg: { name: "Vitamin C", unit: "mg" },
-      vitamin_d_mcg: { name: "Vitamin D", unit: "mcg" },
-      vitamin_e_mg: { name: "Vitamin E", unit: "mg" },
-      vitamin_k_mcg: { name: "Vitamin K", unit: "mcg" },
-      thiamin_mg: { name: "Thiamin (B1)", unit: "mg" },
-      riboflavin_mg: { name: "Riboflavin (B2)", unit: "mg" },
-      niacin_mg: { name: "Niacin (B3)", unit: "mg" },
-      pantothenic_acid_mg: { name: "Pantothenic Acid (B5)", unit: "mg" },
-      vitamin_b6_mg: { name: "Vitamin B6", unit: "mg" },
-      biotin_mcg: { name: "Biotin (B7)", unit: "mcg" },
-      folate_mcg: { name: "Folate (B9)", unit: "mcg" },
-      vitamin_b12_mcg: { name: "Vitamin B12", unit: "mcg" },
-    };
-  }
+  // Removed getMasterNutrientMap in favor of imported MASTER_NUTRIENT_MAP
 
   async estimateNutrition(description: string, portion?: string, calories_hint?: number, trackedNutrients?: string[]) {
     const openai = createOpenAIClient();
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
 
     // If trackedNutrients not provided, fetch from user goals
     if (!trackedNutrients || trackedNutrients.length === 0) {
       const goals = await this.getUserGoals();
       if (typeof goals === 'object' && !(goals as any).message) {
-        trackedNutrients = Object.keys(goals).map(key => this.normalizeNutrientName(key));
+        trackedNutrients = Object.keys(goals).map(key => normalizeNutrientKey(key));
       } else {
         trackedNutrients = [];
       }
@@ -627,7 +587,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
     if (typeof goals === 'object' && !(goals as any).message) {
       // Merge base macros with user goals for complete tracking
-      const goalKeys = Object.keys(goals).map(key => this.normalizeNutrientName(key));
+      const goalKeys = Object.keys(goals).map(key => normalizeNutrientKey(key));
       trackedKeys = Array.from(new Set([...baseMacros, ...goalKeys]));
     }
 
@@ -640,12 +600,16 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
     trackedKeys.forEach(key => {
       const value = this.getNutrientValue(data, key);
+      const normalizedKey = normalizeNutrientKey(key);
 
-      if (value !== undefined) {
-        const numValue = typeof value === 'number' ? value : parseFloat(value);
-        filteredData[key] = !isNaN(numValue) ? Math.round(numValue * 10) / 10 : 0;
-      } else {
-        filteredData[key] = 0;
+      // STRICT FILTERING: Only include if in MASTER_NUTRIENT_MAP
+      if (MASTER_NUTRIENT_MAP[normalizedKey] || normalizedKey === 'calories') {
+        if (value !== undefined) {
+          const numValue = typeof value === 'number' ? value : parseFloat(value);
+          filteredData[normalizedKey] = !isNaN(numValue) ? Math.round(numValue * 10) / 10 : 0;
+        } else {
+          filteredData[normalizedKey] = 0;
+        }
       }
     });
 
@@ -668,7 +632,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
     if (typeof goals === 'object' && !(goals as any).message) {
       // Merge base macros with user goals for complete tracking
-      const goalKeys = Object.keys(goals).map(key => this.normalizeNutrientName(key));
+      const goalKeys = Object.keys(goals).map(key => normalizeNutrientKey(key));
       trackedKeys = Array.from(new Set([...baseMacros, ...goalKeys]));
     }
 
@@ -682,12 +646,16 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
     trackedKeys.forEach(key => {
       const value = this.getNutrientValue(data, key);
+      const normalizedKey = normalizeNutrientKey(key);
 
-      if (value !== undefined) {
-        const numValue = typeof value === 'number' ? value : parseFloat(value);
-        filteredData[key] = !isNaN(numValue) ? Math.round(numValue * 10) / 10 : 0;
-      } else {
-        filteredData[key] = 0;
+      // STRICT FILTERING: Only include if in MASTER_NUTRIENT_MAP
+      if (MASTER_NUTRIENT_MAP[normalizedKey] || normalizedKey === 'calories') {
+        if (value !== undefined) {
+          const numValue = typeof value === 'number' ? value : parseFloat(value);
+          filteredData[normalizedKey] = !isNaN(numValue) ? Math.round(numValue * 10) / 10 : 0;
+        } else {
+          filteredData[normalizedKey] = 0;
+        }
       }
     });
 
@@ -714,52 +682,82 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
   // GOAL TOOLS
   // =============================================================
 
-  /**
-   * Helper to normalize nutrient names to technical column names
-   */
-  private normalizeNutrientName(name: string): string {
-    const lower = name.toLowerCase();
-    const map = this.getMasterNutrientMap();
+  // Removed normalizeNutrientName in favor of imported normalizeNutrientKey
 
-    // Direct match with column names
-    if (map[lower]) return lower;
-
-    // Reverse lookup by human name
-    for (const [key, info] of Object.entries(map)) {
-      if (info.name.toLowerCase() === lower) return key;
+  async updateUserGoal(nutrient: string, targetValue?: number, unit?: string, goalType: 'goal' | 'limit' = 'goal', action: 'set' | 'remove' = 'set', thresholds: any = {}) {
+    const normalizedNutrient = this.normalizeNutrientName(nutrient);
+    if (!normalizedNutrient) {
+      return {
+        error: true,
+        message: `I couldn't identify the nutrient "${nutrient}". Please use standard names like calories, protein, carbs, or fat.`
+      };
     }
 
-    // Common aliases
-    const aliases: Record<string, string> = {
-      'water': 'hydration_ml',
-      'hydration': 'hydration_ml',
-      'liquid': 'hydration_ml',
-      'fluids': 'hydration_ml',
-      'protein': 'protein_g',
-      'carbs': 'carbs_g',
-      'carbohydrates': 'carbs_g',
-      'fat': 'fat_total_g',
-      'total fat': 'fat_total_g',
-      'fiber': 'fiber_g',
-      'sugar': 'sugar_g',
-      'sugars': 'sugar_g',
-      'sodium': 'sodium_mg',
-      'calories': 'calories'
-    };
+    const map = MASTER_NUTRIENT_MAP;
+    const nutrientInfo = map[normalizedNutrient];
 
-    return aliases[lower] || lower;
-  }
+    // STRICT VALIDATION: If not in master map (and not calories), reject or ask for clarification
+    if (!nutrientInfo && normalizedNutrient !== 'calories') {
+      const closest = Object.keys(map).find(k => k.includes(normalizedNutrient) || normalizedNutrient.includes(k));
+      return {
+        error: true,
+        message: `I can't track "${nutrient}". Did you mean ${closest ? map[closest]?.name : 'something else'}? I can only track standard nutrients like Protein, Carbs, Vitamin C, etc.`
+      };
+    }
 
-  async updateUserGoal(nutrient: string, targetValue: number, unit?: string, thresholds: any = {}) {
-    const proposalId = `goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const normalizedNutrient = this.normalizeNutrientName(nutrient);
-    const defaultUnit = normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g';
+    if (action === 'remove') {
+      return {
+        proposal_type: 'goal_update',
+        proposal_id: `goal_rem_${Date.now()}`,
+        pending: true,
+        data: {
+          nutrient: normalizedNutrient,
+          action: 'remove'
+        },
+        message: `Are you sure you want to stop tracking your **${this.getHumanName(normalizedNutrient)}** goal?`
+      };
+    }
 
-    // Clean up thresholds (remove undefined)
+    // Fetch existing goals to fill in missing values
+    const currentGoals = await this.getUserGoals();
+    const existingGoal = (currentGoals as any)[normalizedNutrient];
+
+    let finalValue = targetValue;
+    let finalUnit = unit;
+
+    // Merge logic for missing values
+    if (finalValue === undefined || finalValue === null) {
+      if (existingGoal) {
+        finalValue = existingGoal.target;
+      } else {
+        return {
+          error: true,
+          message: `Please specify a target value for your new ${this.getHumanName(normalizedNutrient)} goal.`
+        };
+      }
+    }
+
+    if (!finalUnit) {
+      finalUnit = existingGoal?.unit || (normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g');
+    }
+
     const cleanedThresholds: any = {};
     if (thresholds.yellow_min !== undefined) cleanedThresholds.yellow_min = thresholds.yellow_min;
     if (thresholds.green_min !== undefined) cleanedThresholds.green_min = thresholds.green_min;
     if (thresholds.red_min !== undefined) cleanedThresholds.red_min = thresholds.red_min;
+
+    const proposalId = `goal_${Date.now()}`;
+    const humanName = this.getHumanName(normalizedNutrient);
+    const typeLabel = goalType === 'limit' ? 'limit' : 'goal';
+
+    let message = `Ready to set your **${humanName}** ${typeLabel} to ${finalValue}${finalUnit}.`;
+    if (existingGoal) {
+      if (existingGoal.target !== finalValue || existingGoal.goal_type !== goalType) {
+        message = `Update your **${humanName}** from its current ${existingGoal.goal_type || 'goal'} (${existingGoal.target}${existingGoal.unit}) to a **${typeLabel}** of ${finalValue}${finalUnit}?`;
+      } else {
+        message = `Your **${humanName}** is already set to a ${typeLabel} of ${finalValue}${finalUnit}. Update thresholds?`;
+      }
+    }
 
     return {
       proposal_type: 'goal_update',
@@ -767,26 +765,110 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       pending: true,
       data: {
         nutrient: normalizedNutrient,
-        target_value: targetValue,
-        unit: unit || defaultUnit,
+        target_value: finalValue,
+        unit: finalUnit,
+        goal_type: goalType,
+        action: 'set',
         ...cleanedThresholds
       },
-      message: `Ready to update ${normalizedNutrient} goal to ${targetValue}${unit || defaultUnit}${Object.keys(cleanedThresholds).length ? ' with custom thresholds' : ''}. Please confirm.`
+      message: message + (Object.keys(cleanedThresholds).length ? ' (with custom color thresholds)' : '')
     };
+  }
+
+  async bulkUpdateUserGoals(goals: any[]) {
+    const proposalId = `bulk_goal_${Date.now()}`;
+    const invalidGoals: string[] = [];
+    const currentGoals = await this.getUserGoals();
+
+    const processedGoals = goals.map(g => {
+      const normalizedNutrient = this.normalizeNutrientName(g.nutrient);
+      if (!normalizedNutrient) {
+        invalidGoals.push(g.nutrient);
+        return null;
+      }
+
+      const existingGoal = (currentGoals as any)[normalizedNutrient];
+
+      let finalValue = g.target_value;
+      if (finalValue === undefined || finalValue === null) {
+        finalValue = g.value; // AI sometimes uses .value
+      }
+
+      // Merge logic
+      if ((finalValue === undefined || finalValue === null) && g.action !== 'remove') {
+        if (existingGoal) {
+          finalValue = existingGoal.target;
+        } else {
+          const humanName = this.getHumanName(normalizedNutrient);
+          invalidGoals.push(`${humanName} (missing value)`);
+          return null;
+        }
+      }
+
+      const humanName = this.getHumanName(normalizedNutrient);
+      const defaultUnit = normalizedNutrient === 'calories' ? 'kcal' : normalizedNutrient === 'sodium_mg' ? 'mg' : 'g';
+
+      const thresholds: any = {};
+      if (g.yellow_min !== undefined) thresholds.yellow_min = g.yellow_min;
+      if (g.green_min !== undefined) thresholds.green_min = g.green_min;
+      if (g.red_min !== undefined) thresholds.red_min = g.red_min;
+
+      return {
+        nutrient: normalizedNutrient,
+        target_value: finalValue,
+        unit: g.unit || existingGoal?.unit || defaultUnit,
+        goal_type: g.goal_type || existingGoal?.goal_type || 'goal',
+        action: g.action || 'set',
+        ...thresholds
+      };
+    }).filter(g => g !== null);
+
+    if (invalidGoals.length > 0) {
+      return {
+        error: true,
+        message: `I encountered issues with: ${invalidGoals.join(', ')}. Please specify target values for new goals.`
+      };
+    }
+
+    const removedCount = processedGoals.filter(g => g.action === 'remove').length;
+    const updatedCount = processedGoals.length - removedCount;
+    let summary = `Ready to process ${processedGoals.length} goal updates.`;
+    if (removedCount > 0 && updatedCount > 0) summary = `I'll update ${updatedCount} goals and remove ${removedCount} others.`;
+    else if (removedCount > 0) summary = `I'll remove ${removedCount} of your tracking goals.`;
+    else summary = `I'll update targets for ${updatedCount} of your goals.`;
+
+    return {
+      proposal_type: 'bulk_goal_update',
+      proposal_id: proposalId,
+      pending: true,
+      data: {
+        goals: processedGoals
+      },
+      message: summary
+    };
+  }
+
+  async deleteUserGoal(nutrient: string) {
+    const normalizedNutrient = normalizeNutrientKey(nutrient);
+    try {
+      await this.db.deleteUserGoal(this.context.userId, normalizedNutrient);
+      return {
+        success: true,
+        message: `Successfully deleted goal for ${normalizedNutrient}.`
+      };
+    } catch (error: any) {
+      console.error(`[ToolExecutor] Error deleting user goal:`, error);
+      return {
+        error: true,
+        message: `Failed to delete goal: ${error.message}`
+      };
+    }
   }
 
   async applyDailyWorkoutOffset(value: number, nutrient: string = 'calories', notes?: string) {
     const proposalId = `workout_${Date.now()}`;
-    const nutrientMap: Record<string, string> = {
-      'protein': 'protein_g',
-      'carbs': 'carbs_g',
-      'fat': 'fat_total_g',
-      'fiber': 'fiber_g'
-    };
-    const normalizedNutrient = nutrientMap[nutrient.toLowerCase()] || nutrient.toLowerCase();
+    const normalizedNutrient = normalizeNutrientKey(nutrient);
 
-    // Directly apply or propose? The requirement says "AI triggers a call". 
-    // Usually PCC pattern is better for tracking.
     return {
       proposal_type: 'workout_adjustment',
       proposal_id: proposalId,
@@ -952,7 +1034,7 @@ Return JSON with: { patterns: string[], insights: string[], suggestions: string[
   private getNutrientValue(data: any, key: string): any {
     if (!data) return undefined;
 
-    const map = this.getMasterNutrientMap();
+    const map = MASTER_NUTRIENT_MAP;
     const info = map[key];
     const aliasesList = {
       'fat_total_g': ['fat', 'total_fat', 'fat_g'],
@@ -1016,5 +1098,28 @@ Return JSON with: { patterns: string[], insights: string[], suggestions: string[
     }
 
     return result;
+  }
+
+  private getHumanName(key: string): string {
+    if (key === 'calories') return 'Calories';
+    const info = MASTER_NUTRIENT_MAP[key];
+    return info ? info.name : key;
+  }
+
+  private normalizeNutrientName(name: string): string {
+    const k = name.toLowerCase().trim();
+    if (k === 'calories' || k === 'kcal' || k === 'energy') return 'calories';
+    if (k === 'protein') return 'protein_g';
+    if (k === 'carbs' || k === 'carbohydrates') return 'carbs_g';
+    if (k === 'fat') return 'fat_total_g';
+
+    const map = MASTER_NUTRIENT_MAP;
+    for (const [masterKey, i] of Object.entries(map)) {
+      if (k === masterKey) return masterKey;
+      const info = i as any;
+      if (k === info.name.toLowerCase()) return masterKey;
+      if (info.aliases?.includes(k)) return masterKey;
+    }
+    return normalizeNutrientKey(name);
   }
 }

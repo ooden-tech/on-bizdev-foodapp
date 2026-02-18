@@ -2,6 +2,7 @@ import { lookupNutrition } from '../../nutrition-lookup/index.ts';
 import { createAdminClient } from '../../_shared/supabase-client.ts';
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { normalizeFoodName } from '../../_shared/utils.ts';
+import { MASTER_NUTRIENT_MAP } from '../../_shared/nutrients.ts';
 // Fallback nutrition data for common ingredients (per 100g unless specified)
 const NUTRITION_FALLBACKS = {};
 // Modifiers to remove for loose matching
@@ -562,6 +563,9 @@ export class NutritionAgent {
             }
             ${extraNutrients}
             
+            Use these EXACT keys for specific nutrients if needed:
+            ${Object.keys(MASTER_NUTRIENT_MAP).join(', ')}
+
             Be realistic. If a value is negligible (like fat in an apple), put 0, but do NOT put 0 for calories unless it's water/salt.
             If you are completely unsure, return null.`
           },

@@ -10,7 +10,7 @@ import ChatDashboardLayout from '@/components/ChatDashboardLayout';
 import DashboardShell from '@/components/DashboardShell';
 import DashboardSummaryTable from '@/components/DashboardSummaryTable';
 import ChatMessageList from '@/components/ChatMessageList';
-import { MASTER_NUTRIENT_LIST, getStartAndEndOfDay } from 'shared';
+import { normalizeNutrientKey, MASTER_NUTRIENT_MAP, getStartAndEndOfDay } from 'shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,28 +47,6 @@ interface ChatSessionMeta {
   title: string;
   updated_at: string;
 }
-
-// --- Constants & Helpers ---
-const normalizeNutrientKey = (key: string): string => {
-  const k = key.toLowerCase().trim();
-  if (k === 'calories' || k === 'kcal' || k === 'energy') return 'calories';
-  if (k.includes('protein')) return 'protein_g';
-  if (k.includes('carb')) return 'carbs_g';
-  if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
-  if (k.includes('fat')) return 'fat_total_g';
-  if (k.includes('fiber')) return 'fiber_g';
-  if (k.includes('sugar')) return 'sugar_g';
-  if (k.includes('sodium')) return 'sodium_mg';
-  if (k.includes('potassium')) return 'potassium_mg';
-  if (k.includes('cholesterol')) return 'cholesterol_mg';
-  if (k.includes('calcium')) return 'calcium_mg';
-  if (k.includes('iron')) return 'iron_mg';
-  if (k.includes('magnesium')) return 'magnesium_mg';
-  if (k.includes('vit') && k.includes('a')) return 'vitamin_a_mcg';
-  if (k.includes('vit') && k.includes('c')) return 'vitamin_c_mg';
-  if (k.includes('vit') && k.includes('d')) return 'vitamin_d_mcg';
-  return key.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-};
 
 export default function ChatPage() {
   const router = useRouter();
