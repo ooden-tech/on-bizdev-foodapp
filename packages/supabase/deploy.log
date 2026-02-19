@@ -1,0 +1,11 @@
+npm warn Unknown project config "node-linker". This will stop working in the next major version of npm.
+Using workdir C:\Users\ianku\Desktop\cursor projects\Joshs Food App\packages
+Bundling Function: chat-handler
+Error: failed to create the graph
+
+Caused by:
+    Relative import path "@supabase/supabase-js" not prefixed with / or ./ or ../
+      hint: If you want to use a JSR or npm package, try running `deno add jsr:@supabase/supabase-js` or `deno add npm:@supabase/supabase-js`
+        at file:///Users/ianku/Desktop/cursor%20projects/Joshs%20Food%20App/packages/supabase/functions/chat-handler/services/db-service.ts:3:36
+error running container: exit 1
+Try rerunning the command with --debug to troubleshoot the error.

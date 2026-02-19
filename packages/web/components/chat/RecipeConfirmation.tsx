@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { UserGoal, NUTRIENT_MAP } from './NutrientDisplay';
+import { UserGoal } from './NutrientDisplay';
+import { MASTER_NUTRIENT_MAP } from 'shared';
 
 interface Ingredient {
     name: string;
@@ -46,7 +47,7 @@ export const RecipeConfirmation: React.FC<RecipeConfirmationProps> = ({
 
     // Calculate tracked nutrients (scaled to 1 serving if isMatch, otherwise total)
     const trackedDetails = userGoals
-        .filter(goal => goal.nutrient !== 'calories')
+        .filter(goal => goal?.nutrient && goal.nutrient !== 'calories')
         .map(goal => {
             let val = nutrition ? nutrition[goal.nutrient] : undefined;
 
@@ -58,9 +59,9 @@ export const RecipeConfirmation: React.FC<RecipeConfirmationProps> = ({
             const conf = nutrition?.confidence_details?.[goal.nutrient] || nutrition?.confidence || 'high';
 
             return {
-                name: NUTRIENT_MAP[goal.nutrient]?.name || goal.nutrient.replace(/_/g, ' '),
+                name: MASTER_NUTRIENT_MAP[goal.nutrient]?.name || goal.nutrient.replace(/_/g, ' '),
                 value: scaledVal,
-                unit: NUTRIENT_MAP[goal.nutrient]?.unit || goal.unit,
+                unit: MASTER_NUTRIENT_MAP[goal.nutrient]?.unit || goal.unit,
                 confidence: conf
             };
         });

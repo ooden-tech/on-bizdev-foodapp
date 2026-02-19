@@ -54,8 +54,39 @@ const INGREDIENT_MODIFIERS = [
   'sweetened',
   'unsweetened'
 ];
+
+const SMALL_ITEMS_WHITELIST = [
+  'garlic', 'chili', 'chilies', 'spice', 'spices', 'herb', 'herbs', 'tea',
+  'zest', 'ginger', 'scallion', 'scallions', 'jalapeno', 'jalapeño',
+  'bay leaf', 'bay leaves', 'nut', 'nuts', 'berry', 'berries', 'saffron',
+  'pepper', 'leaf', 'leaves', 'clove', 'cloves'
+];
+
 // Track failed lookups for logging
 const failedLookups = new Map();
+
+function isStandardUnit(unit: string): boolean {
+  if (!unit) return false;
+  // Check macros lists in convertToGrams/Ml
+  return ['g', 'gram', 'mg', 'milligram', 'kg', 'kilogram', 'oz', 'ounce', 'lb', 'pound',
+    'ml', 'milliliter', 'l', 'liter', 'tsp', 'teaspoon', 'tbsp', 'tablespoon',
+    'cup', 'fl oz', 'fluid ounce', 'pt', 'pint', 'qt', 'quart', 'gal', 'gallon'].includes(unit.toLowerCase());
+}
+
+function calculateHydration(itemName: string, amount: number, unit: string): number {
+  const liquidKeywords = [
+    'water', 'broth', 'stock', 'bouillon', 'consomme', 'soup',
+    'milk', 'juice', 'tea', 'coffee', 'beer', 'wine', 'cider', 'soda', 'beverage', 'drink'
+  ];
+  const name = itemName.toLowerCase();
+
+  // Must be a liquid type
+  if (!liquidKeywords.some(k => name.includes(k))) return 0;
+
+  // Must have a volumetric unit we can convert
+  const ml = convertToMl(amount, unit);
+  return ml || 0;
+}
 /**
  * Find a fallback from NUTRITION_FALLBACKS using loose matching
  */ function findFallbackNutrition(searchTerm) {
@@ -121,25 +152,42 @@ const failedLookups = new Map();
     }
   }
 }
+
+function checkNutrientGoals(ingredient: string, reason: string, context: any) {
+  // Simple heuristic for now
+  if (!context.goals) return [];
+  // implementation...
+  return [];
+}
+
 /**
- * Check if nutrition data is valid (has non-zero calories for non-zero-calorie foods)
- */ function isValidNutrition(data, itemName) {
+ * Validates nutrition data to ensure it's not "empty" or "hollow"
+ */
+function isValidNutrition(data: any, itemName: string) {
   if (!data) return false;
-  // Most foods should have calories - only salt/spices have 0
-  const zeroCalorieItems = [
-    'salt',
-    'water',
-    'pepper',
-    'spice',
-    'herb',
-    'tea',
-    'coffee'
-  ];
-  const isZeroCalorieItem = zeroCalorieItems.some((z) => itemName.toLowerCase().includes(z));
-  if (data.calories === 0 && !isZeroCalorieItem) {
-    console.warn(`[NutritionAgent] Warning: 0 calories for "${itemName}" - may be incorrect`);
+  // Check essential fields
+  if (data.calories === undefined && data.protein_g === undefined) return false;
+
+  // Check for 0-calorie items that should have calories
+  const likelyCaloric = /oil|butter|fat|sugar|syrup|honey|flour|rice|pasta|bread|meat|chicken|beef|pork|fish|egg|cheese|nut|seed|avocado/i;
+  // If calories are 0 or very low, but it's a known caloric food
+  if ((data.calories || 0) < 5 && likelyCaloric.test(itemName)) {
+    console.warn(`[NutritionAgent] Warning: "${itemName}" has ${data.calories} calories, which seems too low.`);
     return false;
   }
+
+  // Check for "Hollow Fat" (Total Fat > 1g but 0 Subtypes)
+  if (data.fat_total_g > 1) {
+    const subTypeSum = (data.fat_saturated_g || 0) +
+      (data.fat_mono_g || 0) +
+      (data.fat_poly_g || 0);
+
+    if (subTypeSum < 0.1) {
+      console.warn(`[NutritionAgent] Warning: Hollow Fat detected for "${itemName}" (Total: ${data.fat_total_g}, Subtypes: ${subTypeSum})`);
+      return false;
+    }
+  }
+
   return true;
 }
 export async function getScalingMultiplier(userPortion, servingSize, foodName, supabase) {
@@ -203,20 +251,91 @@ export async function getScalingMultiplier(userPortion, servingSize, foodName, s
   if (foodName && supabase) {
     try {
       const normalizedFood = foodName.toLowerCase().trim();
-      const { data: cached } = await supabase.from('unit_conversions').select('multiplier').eq('food_name', normalizedFood).eq('from_unit', userPortion.toLowerCase().trim()).eq('to_unit', servingSize.toLowerCase().trim()).limit(1).maybeSingle();
+      const nToUnit = servingSize.toLowerCase().trim();
+      const nFromUnit = userPortion.toLowerCase().trim();
+
+      // Check standard 1:1 match
+      const { data: cached } = await supabase.from('unit_conversions')
+        .select('multiplier')
+        .eq('food_name', normalizedFood)
+        .eq('from_unit', nFromUnit)
+        .eq('to_unit', nToUnit)
+        .limit(1).maybeSingle();
+
       if (cached) {
         console.log(`[NutritionAgent] Conversion cache hit: ${userPortion} -> ${servingSize} = ${cached.multiplier}`);
         return cached.multiplier;
+      }
+
+      // Feature: Check "Gram Cache" for unitless items
+      // If we are looking for "1 onion" -> "100g", we might have "onion" ("1 serving") -> "150g"
+      if (userParsed && !isStandardUnit(userParsed.unit)) {
+        const { data: gramCache } = await supabase.from('unit_conversions')
+          .select('multiplier')
+          .eq('food_name', normalizedFood)
+          .eq('from_unit', userParsed.unit || 'serving')
+          .eq('to_unit', 'g')
+          .limit(1).maybeSingle();
+
+        if (gramCache) {
+          // gramCache.multiplier is the weight in grams of 1 unit
+          const unitWeightGrams = gramCache.multiplier;
+          // We need to convert to official serving size
+          const officialGrams = convertToGrams(officialParsed?.amount || 100, officialParsed?.unit || 'g');
+
+          if (officialGrams) {
+            const totalGrams = unitWeightGrams * userParsed.amount;
+            const multiplier = totalGrams / officialGrams;
+            console.log(`[NutritionAgent] Gram cache hit: 1 ${userParsed.unit} = ${unitWeightGrams}g. Total ${totalGrams}g / ${officialGrams}g = ${multiplier}`);
+            return multiplier;
+          }
+        }
       }
     } catch (err) {
       console.error('[NutritionAgent] Error checking conversion cache:', err);
     }
   }
-  // 3. Fallback to LLM for ambiguous descriptions
-  console.log(`[NutritionAgent] Falling back to LLM for scaling: "${userPortion}" vs "${servingSize}" for "${foodName}"`);
-  const openai = createOpenAIClient();
 
-  // Feature Fix: Context for unitless numbers
+  // 3. Special handling for Unitless/Count items (e.g. "1 onion", "2 carrots")
+  const isCountTypes = userParsed && !isStandardUnit(userParsed.unit);
+
+  if (isCountTypes) {
+    console.log(`[NutritionAgent] Unitless item detected: "${userPortion}" (${foodName}). Estimating unit weight...`);
+    // We need an agent to estimate "How many grams is 1 [unit] [foodName]?"
+    const agent = new NutritionAgent();
+    const estimatedGrams = await agent.estimateUnitWeight(foodName, userParsed?.unit || 'serving');
+
+    if (estimatedGrams > 0) {
+      // Save to Gram Cache
+      if (supabase) {
+        try {
+          await supabase.from('unit_conversions').insert({
+            food_name: foodName.toLowerCase().trim(),
+            from_unit: (userParsed?.unit || 'serving').toLowerCase(),
+            to_unit: 'g',
+            multiplier: estimatedGrams // Storing WEIGHT as multiplier for 'g' target
+          });
+        } catch (err) { /* ignore */ }
+      }
+
+      // Calculate Multiplier against official
+      // If official is "100g", we compare estimatedGrams * userAmount vs 100
+      let officialGrams = 100;
+      if (officialParsed) {
+        const g = convertToGrams(officialParsed.amount, officialParsed.unit);
+        if (g) officialGrams = g;
+      }
+
+      const totalUserGrams = estimatedGrams * (userParsed?.amount || 1);
+      const multiplier = totalUserGrams / officialGrams;
+      console.log(`[NutritionAgent] Count-to-Grams scaling: ${totalUserGrams}g / ${officialGrams}g = ${multiplier}`);
+      return multiplier;
+    }
+  }
+
+  // 4. Fallback to generic LLM for ambiguous descriptions (Legacy path)
+  console.log(`[NutritionAgent] Falling back to generic LLM scaling: "${userPortion}" vs "${servingSize}" for "${foodName}"`);
+  const openai = createOpenAIClient();
   const contextNote = /^\d+(\.\d+)?$/.test(userPortion.trim())
     ? `(Assume "${userPortion}" means "${userPortion} whole ${foodName}" or "${userPortion} serving")`
     : '';
@@ -241,21 +360,36 @@ Example: "1 apple" (approx 180g) vs "100g" -> 1.8
     max_tokens: 10
   });
   const content = response.choices[0].message.content?.trim();
-  // Robustly extract number from content
   const match = content?.match(/[\d\.]+/);
   const multiplier = match ? parseFloat(match[0]) : 1;
-  console.log(`[NutritionAgent] LLM Scaling result: raw="${content}" parsed=${multiplier}`);
   const finalMultiplier = isNaN(multiplier) ? 1 : multiplier;
-  // 4. Validate multiplier before saving / returning
-  const SAFE_MIN = 0.1;
-  const SAFE_MAX = 10.0;
 
+  // 5. Validate multiplier
+  const SAFE_MIN = 0.05; // lowered slightly
+  const SAFE_MAX = 20.0;
+
+  // Check valid range
   if (finalMultiplier < SAFE_MIN || finalMultiplier > SAFE_MAX) {
-    console.warn(`[NutritionAgent] Dangerous multiplier detected: ${finalMultiplier} for "${userPortion}" -> "${servingSize}". Defaulting to 1.`);
+    console.warn(`[NutritionAgent] Dangerous multiplier detected: ${finalMultiplier}. Defaulting to 1.`);
     return 1;
   }
 
-  // 5. Save to cache if successful
+  // Check "Hollow Unit" (Multiplier too small for a macroscopic count item)
+  if (isCountTypes) {
+    // If we ended up here (generic LLM), and we have "1 onion" -> 100g, and it returns 0.01 (1g), that's bad.
+    // Heuristic: If implicit weight < 5g, and NOT standard unit, and NOT in whitelist.
+
+    // Approx implied weight = finalMultiplier * officialGrams (assume 100g base if unknown)
+    const impliedWeight = finalMultiplier * 100; // crude approx
+    const isSmallItem = SMALL_ITEMS_WHITELIST.some(i => foodName.toLowerCase().includes(i));
+
+    if (impliedWeight < 5 && !isSmallItem) {
+      console.warn(`[NutritionAgent] Suspiciously small weight implied (${impliedWeight}g) for "${foodName}". Whitelist check failed. Defaulting to 1 to be safe.`);
+      return 1;
+    }
+  }
+
+  // 6. Save to cache if successful
   if (foodName && supabase && finalMultiplier !== 1) {
     try {
       await supabase.from('unit_conversions').insert({
@@ -323,6 +457,75 @@ function parseUnitAndAmount(str) {
     unit: match[2].trim().replace(/s$/, '') || 'serving'
   };
 }
+function calculateSpecificNutrient(
+  searchTerm: string,
+  nutrition: any,
+  portionGrams: number
+): { amount: number; unit: string; confidence: string } | null {
+  const nutrientMap: { [key: string]: string[] } = {
+    'protein': ['protein_g'],
+    'carbs': ['carbs_g', 'carbohydrates_total_g'],
+    'fat': ['fat_total_g'],
+    'fiber': ['fiber_g'],
+    'sugar': ['sugar_g'],
+    'sodium': ['sodium_mg'],
+    'cholesterol': ['cholesterol_mg'],
+    'saturated fat': ['fat_saturated_g'],
+    'monounsaturated fat': ['fat_mono_g'],
+    'polyunsaturated fat': ['fat_poly_g'],
+    'trans fat': ['fat_trans_g'],
+    'potassium': ['potassium_mg'],
+    'calcium': ['calcium_mg'],
+    'iron': ['iron_mg'],
+    'vitamin a': ['vitamin_a_mcg'],
+    'vitamin c': ['vitamin_c_mg'],
+    'vitamin d': ['vitamin_d_mcg']
+  };
+
+  const normalizedSearchTerm = searchTerm.toLowerCase().trim();
+  const nutrientKeys = nutrientMap[normalizedSearchTerm];
+
+  if (!nutrientKeys) {
+    return null; // Nutrient not recognized
+  }
+
+  let totalAmount = 0;
+  let found = false;
+  for (const key of nutrientKeys) {
+    if (typeof nutrition[key] === 'number' && nutrition[key] > 0) {
+      totalAmount += nutrition[key];
+      found = true;
+    }
+  }
+
+  if (!found) {
+    return null; // Nutrient not found or is zero
+  }
+
+  // Assuming nutrition data is per 100g or per serving_size_g if available
+  const baseGrams = nutrition.serving_size_g || 100; // Default to 100g if serving_size_g is not present
+
+  if (baseGrams === 0) {
+    console.warn(`[NutritionAgent] Cannot calculate specific nutrient for ${searchTerm}: baseGrams is 0.`);
+    return null;
+  }
+
+  const scaledAmount = (totalAmount / baseGrams) * portionGrams;
+
+  // Determine unit based on nutrient type
+  let unit = 'g';
+  if (normalizedSearchTerm.includes('sodium') || normalizedSearchTerm.includes('cholesterol') || normalizedSearchTerm.includes('potassium') || normalizedSearchTerm.includes('calcium') || normalizedSearchTerm.includes('iron') || normalizedSearchTerm.includes('vitamin c')) {
+    unit = 'mg';
+  } else if (normalizedSearchTerm.includes('vitamin a') || normalizedSearchTerm.includes('vitamin d')) {
+    unit = 'mcg';
+  }
+
+  return {
+    amount: Math.round(scaledAmount * 10) / 10, // Round to one decimal place
+    unit: unit,
+    confidence: nutrition.confidence || 'medium' // Inherit confidence from main nutrition data
+  };
+}
 function convertToGrams(amount, unit) {
   const units = {
     'g': 1,
@@ -364,26 +567,7 @@ export function scaleNutrition(data, multiplier) {
   const scaled = {
     ...data
   };
-  const keysToScale = [
-    'calories',
-    'protein_g',
-    'fat_total_g',
-    'carbs_g',
-    'fiber_g',
-    'sugar_g',
-    'sodium_mg',
-    'fat_saturated_g',
-    'cholesterol_mg',
-    'potassium_mg',
-    'fat_trans_g',
-    'calcium_mg',
-    'iron_mg',
-    'magnesium_mg',
-    'vitamin_a_mcg',
-    'vitamin_c_mg',
-    'vitamin_d_mcg',
-    'sugar_added_g'
-  ];
+  const keysToScale = Object.keys(MASTER_NUTRIENT_MAP);
 
   if (multiplier !== 1) {
     keysToScale.forEach((key) => {
@@ -438,7 +622,7 @@ export class NutritionAgent {
       // 2. Try LLM Estimation (PRIMARY source) if no cache
       if (!nutrition) {
         console.log(`[NutritionAgent] Cache miss for "${itemName}", trying LLM estimation (Primary)`);
-        const estimation = await this.estimateNutritionWithLLM(itemName, trackedNutrients);
+        const estimation = await this.estimateNutritionWithLLM(itemName, trackedNutrients, context.recipeName);
 
         if (estimation && isValidNutrition(estimation, itemName)) {
           nutrition = estimation;
@@ -470,17 +654,12 @@ export class NutritionAgent {
           const lookupResult = await lookupNutrition(itemName);
           if (lookupResult.status === 'success' && lookupResult.nutrition_data) {
             nutrition = lookupResult.nutrition_data;
-            // Validate API result
+            // Validate API result - STRICT REJECTION of Hollow Fat
             if (!isValidNutrition(nutrition, itemName)) {
-              console.warn(`[NutritionAgent] API result for "${itemName}" has 0 calories, trying fallback`);
-              const fallback = findFallbackNutrition(itemName);
-              if (fallback && isValidNutrition(fallback, itemName)) {
-                nutrition = fallback;
-              }
-            }
-
-            // Save API result to Cache
-            if (nutrition) {
+              console.warn(`[NutritionAgent] API result for "${itemName}" is invalid/hollow. DISCARDING to force LLM retry.`);
+              nutrition = null;
+            } else {
+              // Only save if valid
               await supabase.from('food_products').insert({
                 product_name: lookupResult.product_name || itemName,
                 search_term: normalizedSearch,
@@ -512,7 +691,20 @@ export class NutritionAgent {
         // 4. Portion scaling
         const multiplier = await getScalingMultiplier(userPortion, nutrition.serving_size, itemName, supabase);
         console.log(`[NutritionAgent] Scaling ${itemName} by ${multiplier} (user: ${userPortion}, official: ${nutrition.serving_size})`);
-        return scaleNutrition(nutrition, multiplier);
+        const scaled = scaleNutrition(nutrition, multiplier);
+
+        // 5. Add Water (Hydration)
+        // Deterministic check based on unit and item keywords
+        const parsedPortion = parseUnitAndAmount(userPortion);
+        if (parsedPortion) {
+          const hydration = calculateHydration(itemName, parsedPortion.amount, parsedPortion.unit);
+          if (hydration > 0) {
+            scaled.hydration_ml = hydration;
+            console.log(`[NutritionAgent] Added hydration for ${itemName}: ${hydration}ml`);
+          }
+        }
+
+        return scaled;
       } else {
         // Final failure log
         await logFailedLookup(itemName, 'No nutrition data available from Cache, LLM, or API', {
@@ -525,7 +717,39 @@ export class NutritionAgent {
     }));
     return results.filter((r) => r !== null);
   }
-  async estimateNutritionWithLLM(itemName, trackedNutrients = []) {
+
+  async estimateUnitWeight(foodName: string, unit: string): Promise<number> {
+    try {
+      const openai = createOpenAIClient();
+      const prompt = `
+  You are an expert chef. What is the average weight in GRAMS of:
+  "${unit}" of "${foodName}"?
+  
+  Examples: 
+  - "1 whole" "Onion" -> 150
+  - "1 clove" "Garlic" -> 5
+  - "1 serving" "Spinach" -> 85
+  
+  Return ONLY the number (integer grams). If unsure or it varies wildy, return 0.
+  `;
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 10
+      });
+
+      const content = response.choices[0].message.content?.trim();
+      const match = content?.match(/[\d\.]+/);
+      const grams = match ? parseFloat(match[0]) : 0;
+      console.log(`[NutritionAgent] Estimated weight for 1 ${unit} ${foodName} = ${grams}g`);
+      return grams;
+    } catch (err) {
+      console.error('[NutritionAgent] Error estimating unit weight:', err);
+      return 0;
+    }
+  }
+
+  async estimateNutritionWithLLM(itemName: string, trackedNutrients: string[] = [], recipeContext: string = '') {
     try {
       const openai = createOpenAIClient();
 
@@ -533,12 +757,16 @@ export class NutritionAgent {
         ? `\nIMPORTANT: Also estimate these specific nutrients if possible: ${trackedNutrients.join(', ')}.`
         : '';
 
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a nutrition expert. Estimate nutrition data for a given food item. 
+      const contextPrompt = recipeContext
+        ? `\nCONTEXT: This ingredient is used in the recipe "${recipeContext}". Use this to infer if it's likely raw, cooked, or specific variety.`
+        : '';
+
+      let attempts = 0;
+      const maxAttempts = 2;
+      let messages = [
+        {
+          role: 'system',
+          content: `You are a nutrition expert. Estimate nutrition data for a given food item. 
             Return ONLY a JSON object matching this interface:
             {
               "food_name": string,
@@ -550,6 +778,10 @@ export class NutritionAgent {
               "sugar_g": number,
               "sodium_mg": number,
               "fat_saturated_g": number,
+              "fat_mono_g": number, 
+              "fat_poly_g": number,
+              "omega_3_g": number,
+              "omega_6_g": number,
               "cholesterol_mg": number,
               "potassium_mg": number,
               "calcium_mg": number,
@@ -559,50 +791,87 @@ export class NutritionAgent {
               "vitamin_c_mg": number,
               "vitamin_d_mcg": number,
               "serving_size": string (e.g. "100g", "1 cup", "1 scoop")
-              // Add other nutrients if requested
             }
-            ${extraNutrients}
             
-            Use these EXACT keys for specific nutrients if needed:
-            ${Object.keys(MASTER_NUTRIENT_MAP).join(', ')}
-
-            Be realistic. If a value is negligible (like fat in an apple), put 0, but do NOT put 0 for calories unless it's water/salt.
-            If you are completely unsure, return null.`
-          },
-          {
-            role: 'user',
-            content: `Estimate nutrition for: "${itemName}"`
-          }
-        ],
-        response_format: {
-          type: 'json_object'
+            IMPORTANT:
+            - You MUST estimate values for ALL the above keys.
+            - If a value is negligible (like fat in an apple), put 0.
+            - Do NOT put 0 for calories unless it's water/salt/diet soda.
+            - Accurately estimate FAT TYPES (saturated, mono, poly, omega-3, omega-6). Total Fat must roughly equal the sum of these.
+            - If you are completely unsure about the item, return null. ${contextPrompt}`
+        },
+        {
+          role: 'user',
+          content: `Estimate nutrition for: "${itemName}"${extraNutrients}`
         }
-      });
-      const content = response.choices[0].message.content;
-      if (!content) return null;
-      const parsed = JSON.parse(content);
-      if (!parsed || (parsed.calories === undefined && parsed.calories !== 0)) return null;
+      ];
 
-      const result = {
+      let parsed: any = null;
+
+      while (attempts < maxAttempts) {
+        attempts++;
+        const response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: messages as any,
+          response_format: { type: 'json_object' }
+        });
+
+        const content = response.choices[0].message.content;
+        if (!content) return null;
+
+        try {
+          parsed = JSON.parse(content);
+        } catch (e) {
+          console.error('[NutritionAgent] Failed to parse JSON:', e);
+          return null;
+        }
+
+        if (!parsed || (parsed.calories === undefined && parsed.calories !== 0)) return null;
+
+        // Validation Check
+        // We reconstruct a temporary result to check validity
+        const tempCheck = {
+          calories: parsed.calories,
+          fat_total_g: parsed.fat_total_g || 0,
+          fat_saturated_g: parsed.fat_saturated_g || 0,
+          fat_mono_g: parsed.fat_mono_g || 0,
+          fat_poly_g: parsed.fat_poly_g || 0,
+          omega_3_g: parsed.omega_3_g || 0,
+          omega_6_g: parsed.omega_6_g || 0
+        };
+
+        if (isValidNutrition(tempCheck as any, itemName)) {
+          // Valid! Break loop
+          break;
+        } else {
+          console.warn(`[NutritionAgent] LLM returned invalid/hollow data (Attempt ${attempts}/${maxAttempts}). Retrying...`);
+          // Add error context to prompt for next try
+          messages.push({ role: 'assistant', content });
+          messages.push({
+            role: 'user',
+            content: `Your previous response had data integrity issues (e.g. Total Fat > 1g but 0g Saturated/Mono/Poly). You MUST estimate the fat subtypes.`
+          });
+          parsed = null; // Reset
+        }
+      }
+
+      if (!parsed) return null; // Failed after retries
+
+      const result: any = {
         food_name: parsed.food_name || itemName,
-        calories: parsed.calories,
-        protein_g: parsed.protein_g || 0,
-        carbs_g: parsed.carbs_g || 0,
-        fat_total_g: parsed.fat_total_g || 0,
-        serving_size: parsed.serving_size || '100g',
-        fiber_g: parsed.fiber_g || 0,
-        sugar_g: parsed.sugar_g || 0,
-        sodium_mg: parsed.sodium_mg || 0,
-        fat_saturated_g: parsed.fat_saturated_g || 0,
-        cholesterol_mg: parsed.cholesterol_mg || 0,
-        potassium_mg: parsed.potassium_mg || 0,
-        calcium_mg: parsed.calcium_mg || 0,
-        iron_mg: parsed.iron_mg || 0,
-        magnesium_mg: parsed.magnesium_mg || 0,
-        vitamin_a_mcg: parsed.vitamin_a_mcg || 0,
-        vitamin_c_mg: parsed.vitamin_c_mg || 0,
-        vitamin_d_mcg: parsed.vitamin_d_mcg || 0
+        serving_size: parsed.serving_size || '100g'
       };
+
+      // Dynamically populate all known nutrients from the Master Map
+      // This ensures we never "drop" a nutrient that the LLM provided (e.g. fat_mono_g, omega_3_g)
+      Object.keys(MASTER_NUTRIENT_MAP).forEach(key => {
+        // If the LLM provided it, use it. Otherwise default to 0.
+        // Special case: don't overwrite if it was already set (though here we build fresh)
+        result[key] = typeof parsed[key] === 'number' ? parsed[key] : 0;
+      });
+
+      // Explicitly preserve calories from parsed if it exists (sanity check)
+      if (parsed.calories !== undefined) result.calories = parsed.calories;
 
       // Merge any other keys from parsed that might have been requested via trackedNutrients
       for (const key of trackedNutrients) {

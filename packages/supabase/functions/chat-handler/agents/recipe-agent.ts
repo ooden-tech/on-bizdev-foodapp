@@ -178,20 +178,29 @@ export class RecipeAgent {
           messages: [
             {
               role: "system",
-              content: `Extract recipe details from the provided text. Return a JSON object:
+              content: `Extract recipe details from the provided text. Return a JSON object matching this schema:
 {
   "recipe_name": "string",
-  "servings": number,
-  "total_batch_size": "string (optional)",
-  "serving_size": "string (optional)",
-  "ingredients": [ { "name": "string", "quantity": number, "unit": "string" } ],
+  "servings": number | null,
+  "servings_source": "explicit_text" | "estimated",
+  "ingredients_included": [ { "name": "string", "quantity": number, "unit": "string" } ],
+  "ingredients_excluded": [ { "name": "string", "reason": "string" } ],
   "instructions": "string"
 }
-- Use provided name exactly if given. If the user says "save this recipe for my [name]", extract [name] as the recipe\_name.
-- Default servings to 1.
-- Extract batch/serving sizes if mentioned.
-- ONLY include "instructions" if they were explicitly provided. DO NOT infer them.
-- If not a recipe, return what you can find.`
+
+RULES:
+1. **Recipe Name**: Use provided name exactly. if "save this for [name]", use [name].
+2. **Servings**: 
+   - Set "servings" to a number ONLY if the text explicitly states it (e.g. "Serves 4").
+   - Set "servings_source" to "explicit_text" in this case.
+   - Otherwise, set "servings" to null and "servings_source" to "estimated".
+   - **DO NOT GUESS** servings based on ingredient amounts.
+3. **Ingredients**:
+   - **ingredients_included**: The COOKED BASE RECIPE only.
+   - **ingredients_excluded**: items the user says to "exclude", "omit", "remove", or "leave out". ALSO include items that are optional garnishes added *after* cooking (e.g. "add yogurt at table") if the user hinted at excluding them or if they differ from the base recipe.
+   - If an item is "serve with bread", it goes in excluded (reason: "serving suggestion").
+4. **Instructions**: Only include if explicitly provided.
+5. If not a recipe, return what you can find.`
             },
             {
               role: "user",
@@ -202,7 +211,23 @@ export class RecipeAgent {
         });
         const content = response.choices[0].message.content;
         if (!content) throw new Error('Failed to parse recipe');
-        const parsed = JSON.parse(content);
+
+        // Parse and Normalize Schema
+        const raw = JSON.parse(content);
+        const parsed = {
+          recipe_name: raw.recipe_name,
+          // STRICT LOGIC: Ignore LLM guess if source is not explicit
+          servings: raw.servings_source === 'explicit_text' ? raw.servings : null,
+          ingredients: raw.ingredients_included || [],
+          instructions: raw.instructions,
+          fingerprint: ''
+        };
+
+        // Log exclusions for debugging
+        if (raw.ingredients_excluded && raw.ingredients_excluded.length > 0) {
+          console.log('[RecipeAgent] Excluded items:', raw.ingredients_excluded);
+        }
+
         // Edge case: Zero ingredients parsed
         if (!parsed.ingredients || parsed.ingredients.length === 0) {
           return {
@@ -272,8 +297,9 @@ export class RecipeAgent {
         }
         const servingResult = detectServingType(parsed.ingredients, parsed.recipe_name, action.text);
 
-        // PREFER parsed servings if greater than 1 (meaning it was explicitly found in text)
-        if (!parsed.servings || parsed.servings <= 1) {
+        // PREFER parsed servings if greater than 1 (explicitly in text)
+        // Otherwise use the physics-based estimator
+        if (!parsed.servings || parsed.servings <= 0) {
           parsed.servings = servingResult.suggestedServings;
         }
 
@@ -511,15 +537,16 @@ export class RecipeAgent {
    */ async calculateNutrition(parsed, context) {
     const ingredientNames = parsed.ingredients.map((ing) => ing.name);
     const ingredientPortions = parsed.ingredients.map((ing) => `${ing.quantity} ${ing.unit}`);
-    let batchNutrition = {};
-    let ingredientsWithNutrition = [];
-    let warnings = [];
+    let batchNutrition: Record<string, any> = {};
+    let ingredientsWithNutrition: any[] = [];
+    let warnings: string[] = [];
     try {
       const nutritionAgent = new NutritionAgent();
       const nutritionResults = await nutritionAgent.execute({
         items: ingredientNames,
         portions: ingredientPortions
-      }, context);
+      }, { ...context, recipeName: parsed.recipe_name }); // Pass Recipe Name Context
+
       // 4. Validate ingredients (Early Warning)
       const likelyCaloric = /protein|oil|butter|fat|carb|flour|bread|meat|chicken|beef|egg|milk|cheese|rice|pasta|sugar|honey|syrup|avocado|nut|almond|peanut|snack|cookie|cake|chip|potato|corn|bean|lentil|salmon|tuna|steak|pork|bacon|yogurt/i;
       parsed.ingredients.forEach((ing, i) => {
@@ -552,6 +579,44 @@ export class RecipeAgent {
           batchNutrition[key] = Math.round(batchNutrition[key] * 10) / 10;
         }
       });
+
+      // GALORIE SYNC CHECK (New in Round 3)
+      // Discrepancy between Sum of Cals and Sum of Macros is a major user complaint.
+      // We enforce the Macro-Calculated value if the drift is > 10%.
+      const macroCalories =
+        ((batchNutrition.protein_g || 0) * 4) +
+        ((batchNutrition.carbs_g || 0) * 4) +
+        ((batchNutrition.fat_total_g || 0) * 9);
+
+      const listedCalories = batchNutrition.calories || 0;
+
+      // Logic: If listed is 0 but macros exist -> Use Macros
+      // If listed differs from macros by > 10% -> Use Macros
+      if (listedCalories === 0 && macroCalories > 10) {
+        console.log(`[RecipeAgent] Calorie Sync: 0 listed, ${macroCalories} calculated. Updating.`);
+        batchNutrition.calories = Math.round(macroCalories);
+      } else if (Math.abs(listedCalories - macroCalories) > (macroCalories * 0.1)) {
+        console.warn(`[RecipeAgent] Calorie Drift Detected: Listed ${listedCalories} vs Macro-Calc ${macroCalories}. Syncing to Macros.`);
+        batchNutrition.calories = Math.round(macroCalories);
+      }
+
+      // FAT SUBTYPE INVARIANT CHECK
+      const totalFat = batchNutrition.fat_total_g || 0;
+      if (totalFat > 1) {
+        const saturated = batchNutrition.fat_saturated_g || 0;
+        const mono = batchNutrition.fat_mono_g || 0;
+        const poly = batchNutrition.fat_poly_g || 0;
+        const subtypesSum = saturated + mono + poly;
+
+        // If subtypes are significantly less than total (e.g. < 50%), flag it
+        // But mostly we care if they are missing (0)
+        if (subtypesSum === 0) {
+          warnings.push(`⚠️ **Data Quality**: Total fat is ${totalFat}g, but the breakdown (saturated/mono/poly) is missing.`);
+        } else if (subtypesSum < (totalFat * 0.5)) {
+          // Only warn if the discrepancy is huge (optional, maybe too noisy for now)
+          // warnings.push(`Note: Fat breakdown (${subtypesSum}g) is significantly lower than total fat (${totalFat}g).`);
+        }
+      }
     } catch (err) {
       console.error('[RecipeAgent] Error calculating recipe nutrition:', err);
     }

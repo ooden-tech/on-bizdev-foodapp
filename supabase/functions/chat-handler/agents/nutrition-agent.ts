@@ -553,6 +553,8 @@ export class NutritionAgent {
         model: 'gpt-4o', // Using 4o for speed+intelligence
         messages: [{ role: 'system', content: prompt }],
         response_format: { type: 'json_object' }
+      }, {
+        timeout: 30000 // Increase to 30s for long ingredient lists
       });
 
       const content = response.choices[0].message.content;

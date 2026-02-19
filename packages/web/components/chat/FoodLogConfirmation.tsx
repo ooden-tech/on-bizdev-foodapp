@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NutrientDisplay, UserGoal, NUTRIENT_MAP } from './NutrientDisplay';
+import { NutrientDisplay, UserGoal } from './NutrientDisplay';
 import { formatNutrientName, formatNutrientValue } from '../../utils/formatting';
 
 interface FoodItem {
@@ -180,8 +180,8 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                                             <span className="font-semibold text-gray-600">{n.name}</span>
                                         </div>
                                         <span className={`font-mono font-bold ${(n.confidence === 'low' && n.valueStr !== '0 g') ? 'text-red-600' :
-                                                (n.confidence === 'medium' && n.valueStr !== '0 g') ? 'text-amber-600' :
-                                                    'text-gray-800'
+                                            (n.confidence === 'medium' && n.valueStr !== '0 g') ? 'text-amber-600' :
+                                                'text-gray-800'
                                             }`}>
                                             {n.valueStr}
                                         </span>

@@ -110,24 +110,39 @@ const INGREDIENT_DENSITIES = {
   'juice': 1.05,
   'rice': 0.75,
   'oats': 0.41,
-  'pasta': 0.45
+  'pasta': 0.45,
+  'chicken': 0.8,
+  'beef': 0.9,
+  'pork': 0.9,
+  'meat': 0.9,
+  'tofu': 0.95,
+  'yogurt': 1.03
 };
 /**
  * Parse a portion string into amount and unit
  * Handles fractions, decimals, and various formats
- */ export function parsePortion(text) {
+ */ export function parsePortion(text: string) {
   const original = text.trim();
   let workText = original.toLowerCase();
   // Handle common fractions
   workText = workText.replace(/½/g, '0.5').replace(/¼/g, '0.25').replace(/¾/g, '0.75').replace(/⅓/g, '0.333').replace(/⅔/g, '0.667').replace(/⅛/g, '0.125').replace(/⅜/g, '0.375').replace(/⅝/g, '0.625').replace(/⅞/g, '0.875');
   // Handle text fractions like "1/2", "3/4"
-  workText = workText.replace(/(\d+)\s*\/\s*(\d+)/g, (_match, num, denom)=>{
+  workText = workText.replace(/(\d+)\s*\/\s*(\d+)/g, (_match: string, num: string, denom: string) => {
     return String(parseInt(num) / parseInt(denom));
   });
   // Handle mixed numbers like "1 1/2" or "2-1/4"
-  workText = workText.replace(/(\d+)\s*[-\s]\s*(\d+\.?\d*)/g, (_match, whole, frac)=>{
+  workText = workText.replace(/(\d+)\s*[-\s]\s*(\d+\.?\d*)/g, (_match: string, whole: string, frac: string) => {
     return String(parseInt(whole) + parseFloat(frac));
   });
+  // Handle "to taste" / "optional" / "garnish" -> 0 amount
+  if (workText.includes('to taste') || workText.includes('optional') || workText.includes('garnish') || workText.includes('for serving')) {
+    return {
+      amount: 0,
+      unit: 'to taste',
+      originalText: original
+    };
+  }
+
   // Extract number and unit
   const match = workText.match(/^([0-9.]+)\s*(.*)$/);
   if (match) {
@@ -148,7 +163,8 @@ const INGREDIENT_DENSITIES = {
 }
 /**
  * Normalize a unit to its canonical form
- */ export function normalizeUnit(unit) {
+ */ export function normalizeUnit(unit: string | null | undefined): string {
+  if (!unit || typeof unit !== 'string') return '';
   const lower = unit.toLowerCase().trim();
   return UNIT_ALIASES[lower] || lower;
 }
@@ -203,7 +219,7 @@ const INGREDIENT_DENSITIES = {
     return INGREDIENT_DENSITIES[lower];
   }
   // Check for partial match
-  for (const [key, density] of Object.entries(INGREDIENT_DENSITIES)){
+  for (const [key, density] of Object.entries(INGREDIENT_DENSITIES)) {
     if (lower.includes(key) || key.includes(lower)) {
       return density;
     }

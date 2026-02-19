@@ -38,8 +38,8 @@ const COUNTABLE_WEIGHTS = {
   let totalMl = 0;
   const breakdown = [];
   const unconverted = [];
-  for (const ing of ingredients){
-    const portion = `${ing.quantity} ${ing.unit}`;
+  for (const ing of ingredients) {
+    const portion = `${ing.quantity} ${ing.unit || ''}`;
     const normalizedUnit = normalizeUnit(ing.unit);
     let grams = null;
     let ml = null;
@@ -107,7 +107,7 @@ const COUNTABLE_WEIGHTS = {
     return COUNTABLE_WEIGHTS[unit.toLowerCase()];
   }
   // Check ingredient name for known items
-  for (const [key, weight] of Object.entries(COUNTABLE_WEIGHTS)){
+  for (const [key, weight] of Object.entries(COUNTABLE_WEIGHTS)) {
     if (lower.includes(key) || key.includes(lower)) {
       return weight;
     }
@@ -141,7 +141,7 @@ const COUNTABLE_WEIGHTS = {
     'looks good',
     'ok',
     'okay'
-  ].some((phrase)=>lower === phrase || lower.startsWith(phrase))) {
+  ].some((phrase) => lower === phrase || lower.startsWith(phrase))) {
     return {
       confirmed: true
     };

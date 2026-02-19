@@ -121,7 +121,8 @@ export class IntentAgent {
         messages: messages,
         response_format: {
           type: "json_object"
-        },
+        }
+      }, {
         timeout: 5000 // Force 5s timeout for Intent (fast fail)
       });
       const content = response.choices[0].message.content;
