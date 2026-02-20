@@ -4,7 +4,7 @@ import { handleError } from "../_shared/error-handler.ts";
 import { createSupabaseClient } from "../_shared/supabase-client.ts";
 // V3: Hybrid Multi-Agent Architecture (IntentAgent → ReasoningAgent → ChatAgent)
 import { orchestrateV3 as orchestrate } from "./orchestrator_v3.ts";
-serve(async (req)=>{
+serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders
@@ -30,7 +30,15 @@ serve(async (req)=>{
       });
     }
     const body = await req.json();
-    const { message, session_id, timezone } = body;
+    let { message, session_id, timezone } = body;
+
+    // Validate session_id is a valid UUID to prevent Postgres syntax errors
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (session_id && !uuidRegex.test(session_id)) {
+      console.warn(`[Chat-Handler] Invalid session_id received and stripped: ${session_id}`);
+      session_id = undefined;
+    }
+
     console.log('[Chat-Handler] User:', user.id, 'Session:', session_id, 'Message:', message);
     if (!message) {
       return new Response(JSON.stringify({
@@ -56,9 +64,9 @@ serve(async (req)=>{
     // Stream thinking steps + final response
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
-      async start (controller) {
+      async start(controller) {
         // Callback to send steps to client
-        const onStep = (step)=>{
+        const onStep = (step) => {
           console.log(`[Chat-Handler] Streaming step: ${step}`);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             step

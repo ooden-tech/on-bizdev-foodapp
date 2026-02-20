@@ -514,9 +514,10 @@ export class NutritionAgent {
        - **CRITICAL**: If the user specified a count (e.g. "2 eggs"), your \`serving_size\` string MUST reflect that count (e.g. "2 large eggs", NOT "1 serving").
        - If the user specified a weight, use it.
        - Use specific visual estimates if portion is vague (e.g. "bowl" -> ~400g).
-    3. **Tracked Nutrients**:
-       - For EVERY nutrient listed in 'Tracked Nutrients' above (e.g., 'selenium_mcg', 'vitamin_k_mcg'), you MUST estimate a value and include it in the output.
-       - Do not omit them. If negligible, put 0.
+    3. **Tracked Nutrients & Hydration**:
+       - For EVERY nutrient listed in 'Tracked Nutrients' above, you MUST estimate a value and include it in the output.
+       - **CRITICAL HYDRATION RULE**: If a food is a liquid (water, coffee, tea, soup, milk, etc.) or contains significant water, you MUST populate \`hydration_ml\` with the estimated volume in milliliters (e.g., "500ml water" -> \`hydration_ml: 500\`). DO NOT omit this.
+       - Do not omit tracked nutrients. If negligible, put 0.
     4. **Missing Items**: 
        - If the item is a dry powder (e.g. "protein powder", "collagen", "pre-workout") and NO liquid (water, milk, almond milk) is mentioned in the input or context:
          - Set \`is_missing_item: true\`.

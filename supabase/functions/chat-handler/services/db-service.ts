@@ -2,7 +2,7 @@
  * Service to handle database operations, decoupling persistence from orchestrator
  */
 import { getStartAndEndOfDay, getDateRange } from '../../_shared/utils.ts';
-import { validateNutrientHierarchy } from '../../_shared/nutrient-validation.ts';
+import { validateNutrientHierarchy, normalizeNutrientKey } from '../../_shared/nutrient-validation.ts';
 
 export class DbService {
   supabase: any;
@@ -92,7 +92,7 @@ export class DbService {
 
     const { error } = await this.supabase.from('user_goals').upsert({
       user_id: userId,
-      nutrient: nutrient,
+      nutrient: normalizeNutrientKey(nutrient),
       target_value: value,
       unit: unit,
       goal_type: cleanGoalType,
@@ -187,7 +187,7 @@ export class DbService {
 
         return {
           user_id: userId,
-          nutrient: g.nutrient,
+          nutrient: normalizeNutrientKey(g.nutrient),
           target_value: finalValue,
           unit: g.unit,
           goal_type: cleanGoalType,

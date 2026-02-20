@@ -47,11 +47,11 @@ const DashboardSummaryTable: React.FC<DashboardSummaryTableProps> = ({
             {onRefresh && (
                 <button
                     onClick={onRefresh}
-                    className={`fixed md:absolute bottom - 4 right - 4 z - 20 p - 2 rounded - full shadow bg - white text - gray - 500 hover: bg - gray - 100 hover: text - gray - 700 transition - colors ${refreshing ? 'opacity-50 cursor-not-allowed' : ''} `}
+                    className={`fixed md:absolute bottom-4 right-4 z-20 p-2 rounded-full shadow bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors ${refreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
                     disabled={refreshing}
                     title="Refresh Summary"
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" className={`h - 6 w - 6 ${refreshing ? 'animate-spin' : ''} `} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m-15.357-2a8.001 8.001 0 0015.357 2M15 15h-4.581" />
                     </svg>
                 </button>
@@ -234,7 +234,7 @@ const SummaryTableRow: React.FC<SummaryTableRowProps> = ({ nutrient, current, ta
     }
 
     return (
-        <tr className={`${rowBgClass} transition - colors`}>
+        <tr className={`${rowBgClass} transition-colors`}>
             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                 <div className="flex flex-col">
                     <span>{formatNutrientName(nutrient)}</span>
@@ -244,18 +244,18 @@ const SummaryTableRow: React.FC<SummaryTableRowProps> = ({ nutrient, current, ta
                 </div>
             </td>
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">{displayTarget}</td>
-            <td className={`px - 6 py - 4 whitespace - nowrap text - sm ${textColorClass} `}>{displayCurrent}</td>
+            <td className={`px-6 py-4 whitespace-nowrap text-sm ${textColorClass}`}>{displayCurrent}</td>
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                 <div className="flex items-center space-x-2">
                     {finalTarget !== undefined && (
                         <>
                             <div className="w-24 bg-gray-100 rounded-full h-2 overflow-hidden border border-gray-200">
                                 <div
-                                    className={`h - full transition - all duration - 500 ${progressBarClass} `}
-                                    style={{ width: `${barWidth}% ` }}
+                                    className={`h-full transition-all duration-500 ${progressBarClass}`}
+                                    style={{ width: `${barWidth}%` }}
                                 />
                             </div>
-                            <span className={`text - xs font - bold w - 10 ${textColorClass} `}>{`${percentage}% `}</span>
+                            <span className={`text-xs font-bold w-10 ${textColorClass}`}>{`${percentage}%`}</span>
                         </>
                     )}
                     {finalTarget === undefined && (
@@ -263,8 +263,8 @@ const SummaryTableRow: React.FC<SummaryTableRowProps> = ({ nutrient, current, ta
                     )}
                 </div>
             </td>
-            <td className={`px - 6 py - 4 whitespace - nowrap text - sm font - medium ${deltaColor} `}>
-                {delta !== null ? (delta < 0 ? `+ ${displayDelta} ` : displayDelta) : '-'}
+            <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${deltaColor}`}>
+                {delta !== null ? (delta < 0 ? `+${displayDelta}` : displayDelta) : '-'}
             </td>
         </tr>
     );

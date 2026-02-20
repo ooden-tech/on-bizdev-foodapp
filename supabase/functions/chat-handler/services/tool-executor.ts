@@ -341,7 +341,6 @@ export class ToolExecutor {
 
     if (logs) {
       for (const log of logs) {
-        totals.calories += log.calories || 0;
         totals.items_logged++;
         // Accumulate all other keys
         Object.keys(map).forEach(key => {
@@ -917,10 +916,36 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     }
 
     const lowerQuery = query.toLowerCase();
-    const matches = memories.filter((m: any) =>
-      m.fact.toLowerCase().includes(lowerQuery) ||
-      m.category.toLowerCase().includes(lowerQuery)
-    );
+    const queryTerms = lowerQuery.split(/\s+/).filter((t: string) => t.length > 2);
+
+    const scoredMemories = memories.map((m: any) => {
+      const factLower = m.fact.toLowerCase();
+      const catLower = m.category.toLowerCase();
+      let score = 0;
+
+      // Exact match gets highest priority
+      if (factLower.includes(lowerQuery) || catLower.includes(lowerQuery)) {
+        score += 10;
+      }
+
+      // Token matches
+      queryTerms.forEach((term: string) => {
+        if (factLower.includes(term) || catLower.includes(term)) {
+          score += 1;
+        }
+      });
+
+      return { ...m, _score: score };
+    }).filter((m: any) => m._score > 0);
+
+    // Sort by descending score
+    scoredMemories.sort((a: any, b: any) => b._score - a._score);
+
+    // Remove the internal _score before returning
+    const matches = scoredMemories.map((m: any) => {
+      const { _score, ...rest } = m;
+      return rest;
+    });
 
     return {
       query,

@@ -113,16 +113,16 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                             {Math.round(totalCalories)} <span className="text-sm font-bold text-blue-500">kcal</span>
                         </span>
 
-                        {mainItem?.confidence && mainItem.confidence !== 'high' && (
+                        {(!mainItem?.confidence || mainItem.confidence === 'medium' || mainItem.confidence === 'low') && (
                             <span
-                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${mainItem.confidence === 'low' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${mainItem?.confidence === 'low' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
                                     }`}
-                                title={(mainItem.error_sources?.length ?? 0) > 0 ? `Reasons: ${mainItem.error_sources!.map(formatConfidenceReason).join(', ')}` : undefined}
+                                title={(mainItem?.error_sources?.length ?? 0) > 0 ? `Reasons: ${mainItem.error_sources!.map(formatConfidenceReason).join(', ')}` : undefined}
                             >
-                                {mainItem.confidence === 'low' ? 'Low Confidence' : 'Medium Confidence'}
+                                {mainItem?.confidence === 'low' ? 'Low Confidence' : 'Medium Confidence'}
                             </span>
                         )}
-                        {(!mainItem?.confidence || mainItem.confidence === 'high') && (
+                        {(mainItem?.confidence === 'high') && (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">
                                 High Confidence
                             </span>
