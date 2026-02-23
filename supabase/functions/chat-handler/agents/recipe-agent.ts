@@ -1,5 +1,6 @@
 import { createAdminClient } from '../../_shared/supabase-client.ts';
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
+import { holisticSanitizeNutrients } from '../../_shared/nutrient-validation.ts';
 import { NutritionAgent, scaleNutrition } from './nutrition-agent.ts';
 import { calculateBatchSize, parseBatchSizeResponse } from '../utils/batch-calculator.ts';
 import { detectServingType, generateServingsPrompt, parseServingsResponse } from '../utils/serving-detector.ts';
@@ -587,6 +588,11 @@ export class RecipeAgent {
   /**
    * Save recipe to database
    */ async saveRecipeToDb(parsed, batchNutrition, ingredientsWithNutrition, userId, supabase) {
+    // Sanitize nutrition data before persisting to ensure hierarchy consistency
+    const sanitizedBatch = holisticSanitizeNutrients(batchNutrition);
+    const perServing = scaleNutrition(sanitizedBatch, 1 / (parsed.servings || 1));
+    const sanitizedPerServing = holisticSanitizeNutrients(perServing);
+
     const { data: recipe, error: recipeError } = await supabase.from('user_recipes').insert({
       user_id: userId,
       recipe_name: parsed.recipe_name,
@@ -595,8 +601,8 @@ export class RecipeAgent {
       total_batch_grams: parsed.total_batch_grams,
       serving_size: parsed.serving_size,
       instructions: parsed.instructions,
-      nutrition_data: batchNutrition,
-      per_serving_nutrition: scaleNutrition(batchNutrition, 1 / (parsed.servings || 1)),
+      nutrition_data: sanitizedBatch,
+      per_serving_nutrition: sanitizedPerServing,
       ingredient_fingerprint: parsed.fingerprint || RecipeAgent.calculateFingerprint(parsed.ingredients)
     }).select().single();
     if (recipeError) throw recipeError;
@@ -614,7 +620,10 @@ export class RecipeAgent {
   /**
    * Update existing recipe in database
    */ async updateRecipeInDb(recipeId, parsed, batchNutrition, ingredientsWithNutrition, userId, supabase) {
-    // Update the recipe
+    const sanitizedBatch = holisticSanitizeNutrients(batchNutrition);
+    const perServing = scaleNutrition(sanitizedBatch, 1 / (parsed.servings || 1));
+    const sanitizedPerServing = holisticSanitizeNutrients(perServing);
+
     const { data: recipe, error: recipeError } = await supabase.from('user_recipes').update({
       recipe_name: parsed.recipe_name,
       servings: parsed.servings,
@@ -622,10 +631,10 @@ export class RecipeAgent {
       total_batch_grams: parsed.total_batch_grams,
       serving_size: parsed.serving_size,
       instructions: parsed.instructions,
-      nutrition_data: batchNutrition,
-      per_serving_nutrition: scaleNutrition(batchNutrition, 1 / (parsed.servings || 1)),
+      nutrition_data: sanitizedBatch,
+      per_serving_nutrition: sanitizedPerServing,
       ingredient_fingerprint: parsed.fingerprint || RecipeAgent.calculateFingerprint(parsed.ingredients)
-    }).eq('id', recipeId).eq('user_id', userId) // Safety check
+    }).eq('id', recipeId).eq('user_id', userId)
       .select().single();
     if (recipeError) throw recipeError;
     // Delete old ingredients and insert new ones

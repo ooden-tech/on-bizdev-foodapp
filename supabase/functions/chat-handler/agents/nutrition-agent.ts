@@ -545,14 +545,22 @@ export class NutritionAgent {
        - Use specific visual estimates if portion is vague (e.g. "bowl" -> ~400g).
     3. **Tracked Nutrients & Hydration**:
        - For EVERY nutrient listed in 'Tracked Nutrients' above, you MUST estimate a value and include it in the output.
-       - **CRITICAL HYDRATION RULE**: If a food is a liquid (water, coffee, tea, soup, milk, etc.) or contains significant water, you MUST populate \`hydration_ml\` with the estimated volume in milliliters (e.g., "500ml water" -> \`hydration_ml: 500\`). DO NOT omit this.
+       - **CRITICAL HYDRATION RULE**: You MUST populate \`hydration_ml\` for ANY food that contains water:
+         - Liquids: water, coffee, tea, soup, milk, juice, etc. Use the volume directly (e.g., "500ml water" -> \`hydration_ml: 500\`).
+         - Cooked/water-rich solid foods: eggs (~37ml per large egg), cooked pasta (~100ml per cup), cooked rice (~100ml per cup), fruits, vegetables, yogurt, stews, casseroles. Estimate the intrinsic water content.
+         - Only set \`hydration_ml: 0\` for genuinely dry foods (crackers, chips, dried nuts, chocolate bars, candy, bread, etc.).
        - Do not omit tracked nutrients. If negligible, put 0.
     4. **Missing Items**: 
        - If the item is a dry powder (e.g. "protein powder", "collagen", "pre-workout") and NO liquid (water, milk, almond milk) is mentioned in the input or context:
          - Set \`is_missing_item: true\`.
          - Do NOT invent a liquid; just flag it so we can ask the user.
        - Did the user mention items in the context that aren't in the list? Add them as new results.
-    5. **Safety**: Flag CRITICAL health conflicts (e.g. peanut allergy).
+    5. **Nutrient Hierarchy Consistency**: Your fat subtypes MUST be consistent:
+       - \`fat_poly_g\` >= \`omega_3_g\` + \`omega_6_g\`
+       - \`fat_total_g\` >= \`fat_saturated_g\` + \`fat_poly_g\` + \`fat_mono_g\` + \`fat_trans_g\`
+       - \`carbs_g\` >= \`sugar_g\` + \`fiber_g\`
+       If you provide omega-3/omega-6, you MUST also set \`fat_poly_g\` to at least their sum.
+    6. **Safety**: Flag CRITICAL health conflicts (e.g. peanut allergy).
     
     **OUTPUT JSON**:
     {
@@ -580,27 +588,148 @@ export class NutritionAgent {
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o', // Using 4o for speed+intelligence
+        model: 'gpt-4o',
         messages: [{ role: 'system', content: prompt }],
         response_format: { type: 'json_object' }
       }, {
-        timeout: 30000 // Increase to 30s for long ingredient lists
+        timeout: 30000
       });
 
       const content = response.choices[0].message.content;
       const parsed = content ? JSON.parse(content) : { results: [] };
 
+      // Post-LLM density check with requery for outliers
+      const densityCheckedResults = await this.densityCheckAndRequery(
+        parsed.results, itemsToAnalyze, openai
+      );
+
       // Merge API hits with LLM results
-      return [...apiHits, ...parsed.results.map((r: any) => ({
+      return [...apiHits, ...densityCheckedResults.map((r: any) => ({
         ...r,
         error_sources: r.confidence === 'low' ? ['llm_estimation'] : []
       }))];
 
     } catch (e) {
       console.error('[NutritionAgent] Unified analysis failed:', e);
-      // Fallback: return API hits only (better than crashing)
       return apiHits;
     }
+  }
+
+  /**
+   * Validates LLM nutrition estimates against known caloric density ranges.
+   * If an estimate deviates >25% from expected density, requeries the LLM once
+   * with a specific warning about the expected range.
+   */
+  private async densityCheckAndRequery(
+    results: any[],
+    itemsToAnalyze: any[],
+    openai: any
+  ): Promise<any[]> {
+    const DENSITY_RANGES: Record<string, { min: number; max: number; label: string }> = {
+      chicken: { min: 1.1, max: 2.0, label: 'chicken breast/thigh' },
+      beef: { min: 1.5, max: 2.8, label: 'beef' },
+      pork: { min: 1.4, max: 2.5, label: 'pork' },
+      salmon: { min: 1.5, max: 2.3, label: 'salmon' },
+      fish: { min: 0.8, max: 2.0, label: 'fish' },
+      egg: { min: 1.3, max: 1.6, label: 'egg' },
+      rice: { min: 1.1, max: 1.4, label: 'cooked rice' },
+      pasta: { min: 1.3, max: 1.8, label: 'cooked pasta' },
+      bread: { min: 2.4, max: 3.0, label: 'bread' },
+      cheese: { min: 2.5, max: 4.5, label: 'cheese' },
+      milk: { min: 0.4, max: 0.7, label: 'milk' },
+      butter: { min: 7.0, max: 7.5, label: 'butter' },
+      oil: { min: 8.5, max: 9.0, label: 'cooking oil' },
+      potato: { min: 0.7, max: 1.0, label: 'potato' },
+      banana: { min: 0.8, max: 1.0, label: 'banana' },
+      apple: { min: 0.5, max: 0.6, label: 'apple' },
+      avocado: { min: 1.5, max: 1.8, label: 'avocado' },
+      nut: { min: 5.5, max: 7.0, label: 'nuts' },
+      tofu: { min: 0.7, max: 1.0, label: 'tofu' },
+      yogurt: { min: 0.5, max: 1.2, label: 'yogurt' },
+    };
+
+    const flagged: { index: number; item: any; expected: { min: number; max: number; label: string }; portion: string; grams: number }[] = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const itemInfo = itemsToAnalyze[i];
+      if (!r || !itemInfo) continue;
+
+      const portionStr = (itemInfo.portion || '').toLowerCase();
+      const gramsMatch = portionStr.match(/(\d+\.?\d*)\s*g/);
+      if (!gramsMatch) continue;
+
+      const grams = parseFloat(gramsMatch[1]);
+      if (grams <= 0) continue;
+
+      const density = (r.calories || 0) / grams;
+      const itemLower = (itemInfo.item || '').toLowerCase();
+
+      for (const [keyword, range] of Object.entries(DENSITY_RANGES)) {
+        if (itemLower.includes(keyword)) {
+          const expectedMid = (range.min + range.max) / 2;
+          const deviation = Math.abs(density - expectedMid) / expectedMid;
+          if (deviation > 0.25) {
+            console.warn(`[NutritionAgent] Density outlier: "${itemInfo.item}" at ${density.toFixed(2)} kcal/g (expected ${range.min}-${range.max} for ${range.label})`);
+            flagged.push({ index: i, item: itemInfo, expected: range, portion: portionStr, grams });
+          }
+          break;
+        }
+      }
+    }
+
+    if (flagged.length === 0) return results;
+
+    // Requery flagged items once
+    console.log(`[NutritionAgent] Requerying ${flagged.length} items with density guidance...`);
+    const reqItems = flagged.map(f =>
+      `"${f.item.item}" (portion: "${f.item.portion}") — Expected ${f.expected.min}-${f.expected.max} kcal/g for ${f.expected.label}. ` +
+      `Your previous estimate was ${((results[f.index].calories || 0) / f.grams).toFixed(2)} kcal/g. ` +
+      `Recalculate for EXACTLY ${f.grams}g.`
+    ).join('\n');
+
+    try {
+      const reqPrompt = `You are a nutrition correction engine. The following items had caloric density outside expected ranges.
+Recalculate nutrition for the EXACT portion specified. Use the density guidance to sanity-check your output.
+
+${reqItems}
+
+Return JSON: { "results": [ { "food_name": string, "serving_size": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_total_g": number, ... } ] }`;
+
+      const reqResponse = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'system', content: reqPrompt }],
+        response_format: { type: 'json_object' }
+      }, { timeout: 15000 });
+
+      const reqContent = reqResponse.choices[0].message.content;
+      const reqParsed = reqContent ? JSON.parse(reqContent) : { results: [] };
+
+      if (reqParsed.results && reqParsed.results.length > 0) {
+        flagged.forEach((f, fi) => {
+          if (reqParsed.results[fi]) {
+            const corrected = reqParsed.results[fi];
+            const newDensity = (corrected.calories || 0) / f.grams;
+            const expectedMid = (f.expected.min + f.expected.max) / 2;
+            const newDeviation = Math.abs(newDensity - expectedMid) / expectedMid;
+
+            if (newDeviation < 0.25) {
+              console.log(`[NutritionAgent] Density correction accepted for "${f.item.item}": ${newDensity.toFixed(2)} kcal/g`);
+              corrected.confidence = 'medium';
+              if (!corrected.error_sources) corrected.error_sources = [];
+              corrected.error_sources.push('density_corrected');
+              results[f.index] = corrected;
+            } else {
+              console.warn(`[NutritionAgent] Requery still off for "${f.item.item}" (${newDensity.toFixed(2)} kcal/g). Keeping original.`);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.error('[NutritionAgent] Density requery failed, keeping original estimates:', e);
+    }
+
+    return results;
   }
 
   async execute(input: any, context: any) {

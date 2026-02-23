@@ -12,7 +12,7 @@ import { ValidatorAgent } from '../agents/validator-agent.ts';
 import { createOpenAIClient } from '../../_shared/openai-client.ts';
 import { getStartAndEndOfDay, getDateRange } from '../../_shared/utils.ts';
 import { parseHealthInput } from '../utils/health-parser.ts';
-import { validateNutrientHierarchy, sanitizeNutrients, normalizeNutrientKey, MASTER_NUTRIENT_MAP, NutrientInfo } from '../../_shared/nutrient-validation.ts';
+import { validateNutrientHierarchy, sanitizeNutrients, holisticSanitizeNutrients, normalizeNutrientKey, MASTER_NUTRIENT_MAP, NutrientInfo } from '../../_shared/nutrient-validation.ts';
 
 export class ToolExecutor {
   context: any;
@@ -817,6 +817,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     const filteredData: any = {
       food_name: data.food_name,
       portion: data.portion || 'serving',
+      display_portion: data.display_portion || data.serving_size || data.portion || 'serving',
       confidence: data.confidence,
       confidence_details: data.confidence_details,
       error_sources: data.error_sources
@@ -847,12 +848,15 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     // Ensure calories is explicitly set for the proposal message
     if (filteredData.calories === undefined) filteredData.calories = 0;
 
-    // Feature 10: Validate Nutrient Hierarchy (AI Feedback Loop)
-    // If the AI proposes invalid data (e.g. Sugar > Carbs), reject it immediately
-    // and ask the AI to correct it. Do NOT show this to the user.
+    // Holistic sanitization: lift parent nutrients to accommodate children
+    // (e.g., if omega-3+omega-6 > fat_poly_g, lift fat_poly_g instead of capping omegas to 0)
+    const sanitized = holisticSanitizeNutrients(filteredData);
+    Object.assign(filteredData, sanitized);
+
+    // Validate Nutrient Hierarchy after sanitization
     const validation = validateNutrientHierarchy(filteredData);
     if (!validation.valid) {
-      console.warn(`[ToolExecutor] Rejecting invalid food log proposal: ${validation.violations.join(', ')}`);
+      console.warn(`[ToolExecutor] Rejecting invalid food log proposal after sanitization: ${validation.violations.join(', ')}`);
       return {
         error: true,
         message: `Scientific impossibility detected: ${validation.violations.join(', ')}. Please recalculate and try again with corrected values.`
@@ -914,6 +918,10 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     });
 
     if (filteredData.calories === undefined) filteredData.calories = 0;
+
+    // Holistic sanitization: lift parent nutrients to accommodate children
+    const sanitized = holisticSanitizeNutrients(filteredData);
+    Object.assign(filteredData, sanitized);
 
     return {
       proposal_type: 'recipe_log',

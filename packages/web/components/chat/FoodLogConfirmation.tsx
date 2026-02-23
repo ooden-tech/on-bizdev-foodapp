@@ -103,7 +103,7 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                             {itemName}
                         </h3>
                         <div className="text-sm text-gray-500 font-medium">
-                            {mainItem?.serving_size || '1 serving'}
+                            {mainItem?.display_portion || mainItem?.serving_size || '1 serving'}
                         </div>
                     </div>
 

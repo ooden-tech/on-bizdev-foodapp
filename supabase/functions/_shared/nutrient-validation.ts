@@ -146,6 +146,64 @@ export function sanitizeNutrients(nutrients: Record<string, any>): Record<string
     return sanitized;
 }
 
+/**
+ * Holistic bottom-up sanitization that lifts parent values to accommodate
+ * children, then validates. Prevents the scenario where omega_3/omega_6
+ * are populated but fat_poly_g is 0, which would cause validation rejection
+ * or destructive capping.
+ *
+ * Strategy: work leaf-to-root, lifting each parent to at least the sum
+ * of its known children. This preserves LLM-provided detail while
+ * ensuring the hierarchy is mathematically consistent.
+ *
+ * @returns A NEW object with consistent nutrient values.
+ */
+export function holisticSanitizeNutrients(nutrients: Record<string, any>): Record<string, any> {
+    const s = { ...nutrients };
+
+    const getNum = (key: string): number => {
+        const v = s[key];
+        return typeof v === 'number' && !isNaN(v) ? v : 0;
+    };
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+
+    // --- Sugar sub-group: added_sugar <= sugar ---
+    if (getNum('sugar_added_g') > getNum('sugar_g')) {
+        s.sugar_g = round1(getNum('sugar_added_g'));
+        console.log(`[NutrientValidation] Lifted sugar_g to ${s.sugar_g} to cover sugar_added_g`);
+    }
+
+    // --- Fiber sub-group: soluble_fiber <= fiber ---
+    if (getNum('fiber_soluble_g') > getNum('fiber_g')) {
+        s.fiber_g = round1(getNum('fiber_soluble_g'));
+        console.log(`[NutrientValidation] Lifted fiber_g to ${s.fiber_g} to cover fiber_soluble_g`);
+    }
+
+    // --- Carbs group: sugar + fiber <= carbs ---
+    const carbChildSum = getNum('sugar_g') + getNum('fiber_g');
+    if (carbChildSum > getNum('carbs_g') + 1) {
+        s.carbs_g = round1(carbChildSum);
+        console.log(`[NutrientValidation] Lifted carbs_g to ${s.carbs_g} to cover sugar+fiber sum`);
+    }
+
+    // --- Poly fat sub-group: omega3 + omega6 <= fat_poly ---
+    const omegaSum = getNum('omega_3_g') + getNum('omega_6_g');
+    if (omegaSum > getNum('fat_poly_g')) {
+        s.fat_poly_g = round1(omegaSum);
+        console.log(`[NutrientValidation] Lifted fat_poly_g to ${s.fat_poly_g} to cover omega-3+omega-6 sum`);
+    }
+
+    // --- Fat group: sat + poly + mono + trans <= total ---
+    const fatChildSum = getNum('fat_saturated_g') + getNum('fat_poly_g')
+        + getNum('fat_mono_g') + getNum('fat_trans_g');
+    if (fatChildSum > getNum('fat_total_g') + 1) {
+        s.fat_total_g = round1(fatChildSum);
+        console.log(`[NutrientValidation] Lifted fat_total_g to ${s.fat_total_g} to cover fat component sum`);
+    }
+
+    return s;
+}
+
 export interface NutrientInfo {
     name: string;
     unit: string;

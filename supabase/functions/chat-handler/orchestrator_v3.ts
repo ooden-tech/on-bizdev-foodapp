@@ -478,7 +478,39 @@ function decorateWithContext(message: string, pendingAction: any): string {
           });
         }
       }
-    } else if (activeProposal) {
+    }
+
+    // AUTO-PROPOSAL SAFETY NET FOR RECIPE LOGGING
+    if (intent === 'log_recipe' && !activeProposal) {
+      console.warn('[OrchestratorV3] WARNING: Intent is log_recipe but NO active proposal generated!');
+      const recipeData = reasoningResult.data?.ask_recipe_agent;
+      if (recipeData) {
+        const recipeResult = Array.isArray(recipeData) ? recipeData[0] : recipeData;
+        const recipe = recipeResult?.recipe;
+        if (recipe && recipe.nutrition_data) {
+          console.log(`[OrchestratorV3] Auto-creating recipe log proposal from recipe: "${recipe.recipe_name}"`);
+          const servings = 1;
+          const scale = servings / (recipe.servings || 1);
+          const scaled = scaleNutrition(recipe.nutrition_data || {}, scale);
+          activeProposal = {
+            type: 'recipe_log',
+            id: `auto_recipe_${Date.now()}`,
+            data: {
+              recipe_id: recipe.id,
+              recipe_name: recipe.recipe_name,
+              servings,
+              ...scaled
+            }
+          };
+          await sessionService.savePendingAction(userId, {
+            type: 'recipe_log',
+            data: activeProposal.data
+          });
+        }
+      }
+    }
+
+    if (activeProposal) {
       console.log(`[OrchestratorV3] Active Proposal Generated: ${activeProposal.type} (ID: ${activeProposal.id})`);
     }
 
