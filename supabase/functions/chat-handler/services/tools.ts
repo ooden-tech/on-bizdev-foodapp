@@ -169,8 +169,8 @@
         properties: {
           action: {
             type: "string",
-            enum: ["find", "details", "calculate_serving"],
-            description: "Action to perform"
+            enum: ["find", "list", "details", "calculate_serving"],
+            description: "Action to perform. Use 'list' to show all saved recipes without a search query."
           },
           query: {
             type: "string",
@@ -331,6 +331,21 @@
           "recipe_id",
           "servings"
         ]
+      }
+    }
+  },
+  // =============================================================
+  // CATEGORY 4b: LIST SAVED RECIPES (Fix 1)
+  // =============================================================
+  {
+    type: "function",
+    function: {
+      name: "list_saved_recipes",
+      description: "Lists ALL saved recipes for the user. No search query needed. Use when user asks 'what recipes do I have', 'show my recipes', or 'my saved recipes'.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
       }
     }
   },

@@ -449,6 +449,35 @@ function decorateWithContext(message: string, pendingAction: any): string {
 
     if (intent === 'log_food' && !activeProposal) {
       console.warn('[OrchestratorV3] WARNING: Intent is log_food but NO active proposal generated!');
+      // AUTO-PROPOSAL SAFETY NET: If ReasoningAgent gathered nutrition data but forgot to call propose_food_log,
+      // create the proposal automatically from the gathered ask_nutrition_agent results.
+      const nutritionData = reasoningResult.data?.ask_nutrition_agent;
+      if (nutritionData) {
+        const items = Array.isArray(nutritionData) ? nutritionData : [nutritionData];
+        const validItems = items.filter((item: any) => item && (item.calories !== undefined || item.food_name));
+        if (validItems.length > 0) {
+          console.log(`[OrchestratorV3] Auto-creating proposal from ${validItems.length} gathered nutrition item(s)`);
+          const proposalData = validItems.map((item: any) => ({
+            food_name: item.food_name || 'Unknown Food',
+            portion: item.portion || item.serving_size || '1 serving',
+            calories: Math.round(item.calories || 0),
+            protein_g: Math.round((item.protein_g || 0) * 10) / 10,
+            carbs_g: Math.round((item.carbs_g || 0) * 10) / 10,
+            fat_total_g: Math.round((item.fat_total_g || 0) * 10) / 10,
+            ...item // spread remaining nutrient fields
+          }));
+          activeProposal = {
+            type: 'food_log',
+            id: `auto_${Date.now()}`,
+            data: proposalData.length === 1 ? proposalData[0] : proposalData
+          };
+          // Save to session
+          await sessionService.savePendingAction(userId, {
+            type: 'food_log',
+            data: activeProposal.data
+          });
+        }
+      }
     } else if (activeProposal) {
       console.log(`[OrchestratorV3] Active Proposal Generated: ${activeProposal.type} (ID: ${activeProposal.id})`);
     }
@@ -494,13 +523,11 @@ function decorateWithContext(message: string, pendingAction: any): string {
         response.data.nutrition = Array.isArray(p.data) ? p.data : [p.data];
         response.response_type = 'confirmation_food_log';
       } else if (p.type === 'recipe_log') {
+        // Fix 3B: Spread all proposal data to preserve nutrients (was hardcoding only 5 fields)
         response.data.nutrition = [
           {
+            ...p.data,
             food_name: p.data.recipe_name,
-            calories: p.data.calories,
-            protein_g: p.data.protein_g,
-            carbs_g: p.data.carbs_g,
-            fat_total_g: p.data.fat_total_g,
             serving_size: `${p.data.servings} serving(s)`
           }
         ];

@@ -94,6 +94,12 @@ You MUST return a JSON object:
   "modified_items": [{ "item": "string", "portion": "string" }],
   "memory_content": { "category": "food" | "health" | "habits" | "preferences", "fact": "string" }
 }
+
+INTENT EXAMPLES:
+- "what timezone am I in" -> account_settings
+- "what time is it" -> account_settings
+- "what recipes do I have saved" -> log_recipe (let ReasoningAgent decide to list)
+- "show my recipes" -> log_recipe
 `;
 
 export class IntentAgent {
@@ -131,8 +137,26 @@ export class IntentAgent {
       return JSON.parse(content);
     } catch (error) {
       console.error('[IntentAgent] Execution Error (Returning Fallback):', error);
-      // Fallback: Return a generic intent that falls through to ReasoningAgent (Step 4)
-      // This allows the smarter gpt-4o to handle complex requests that timed out the mini model
+
+      // Fix 7A: Smart fallback — detect food-related keywords to preserve intent
+      const lowerMsg = message.toLowerCase();
+      const foodKeywords = ['log', 'ate', 'had', 'eat', 'eating', 'drank', 'drink', 'consumed', 'record', 'track'];
+      const isFoodRelated = foodKeywords.some(kw => lowerMsg.includes(kw));
+
+      if (isFoodRelated) {
+        console.log('[IntentAgent] Timeout fallback: detected food keywords, returning log_food intent');
+        return {
+          intent: "log_food",
+          confidence: "low",
+          ambiguity_level: "medium",
+          ambiguity_reasons: ["fallback_from_timeout"],
+          food_items: [],
+          portions: [],
+          notes: "IntentAgent timed out. Detected food keywords — routed to log_food."
+        };
+      }
+
+      // Generic fallback for non-food messages
       return {
         intent: "complex_request",
         confidence: "low",

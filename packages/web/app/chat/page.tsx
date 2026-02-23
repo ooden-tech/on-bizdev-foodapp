@@ -334,6 +334,31 @@ export default function ChatPage() {
           }
         }
       }
+
+      // Flush any remaining buffer content after stream ends
+      if (buffer.trim()) {
+        const remainingLines = buffer.split('\n');
+        for (const line of remainingLines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const json = JSON.parse(line.substring(6));
+              if (json.status) {
+                const botMessage = processBotReply(json);
+                setChatHistory(prev => [...prev, botMessage]);
+                setCurrentStep(null);
+                if (json.response_type === 'food_logged' ||
+                  json.response_type === 'recipe_logged' ||
+                  json.response_type === 'goal_updated' ||
+                  json.response_type === 'goals_updated') {
+                  fetchDashboardData(true);
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing remaining buffer:', e, line);
+            }
+          }
+        }
+      }
     } catch (error: any) {
       console.error('Error sending message:', error);
       setChatHistory(prev => [...prev, {

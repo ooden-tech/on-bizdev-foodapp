@@ -145,6 +145,35 @@ const failedLookups = new Map();
 }
 export async function getScalingMultiplier(userPortion, servingSize, foodName, supabase) {
   if (!servingSize) return 1;
+
+  // FIX: Branded item heuristic - "1 serving" = "1 sandwich/burger/bowl" for named foods
+  const userLower = (userPortion || '').toLowerCase().trim();
+  const servingLower = (servingSize || '').toLowerCase().trim();
+  const descriptiveUnits = ['sandwich', 'burger', 'burrito', 'wrap', 'bowl', 'muffin', 'cookie',
+    'donut', 'doughnut', 'bar', 'piece', 'slice', 'cup', 'can', 'bottle', 'packet',
+    'box', 'taco', 'pizza', 'pie', 'bagel', 'biscuit', 'croissant', 'waffle', 'pancake',
+    'nugget', 'wing', 'strip', 'patty', 'serving', 'container', 'pouch', 'bag', 'scoop'];
+  const userMatch = userLower.match(/^(\d+\.?\d*)\s*(.+)$/);
+  const servingMatch = servingLower.match(/^(\d+\.?\d*)\s*(.+)$/);
+  if (userMatch && servingMatch) {
+    const userCount = parseFloat(userMatch[1]);
+    const servingCount = parseFloat(servingMatch[1]);
+    const userUnit = userMatch[2].trim();
+    const servingUnit = servingMatch[2].trim();
+    // If user says "1 serving" and API says "1 [descriptor]" they mean the same thing
+    if (userUnit === 'serving' && descriptiveUnits.some(d => servingUnit.includes(d))) {
+      const multiplier = userCount / servingCount;
+      console.log(`[NutritionAgent] Branded-item heuristic: "${userPortion}" = "${servingSize}" -> ${multiplier}`);
+      return multiplier;
+    }
+    // If both are descriptive ("1 sandwich" = "1 sandwich"), same unit
+    if (userUnit === servingUnit) {
+      const multiplier = userCount / servingCount;
+      console.log(`[NutritionAgent] Same-descriptor: "${userPortion}" / "${servingSize}" = ${multiplier}`);
+      return multiplier;
+    }
+  }
+
   // 1. Rule-based scaling for common units
   const userParsed = parseUnitAndAmount(userPortion);
   const officialParsed = parseUnitAndAmount(servingSize);

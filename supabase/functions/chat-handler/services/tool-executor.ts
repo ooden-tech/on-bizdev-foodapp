@@ -77,6 +77,8 @@ export class ToolExecutor {
           return this.estimateNutrition(args.description, args.portion, args.calories_hint, args.tracked_nutrients);
         case 'search_saved_recipes':
           return this.searchSavedRecipes(args.query);
+        case 'list_saved_recipes':
+          return this.listSavedRecipes();
         case 'get_recipe_details':
           return this.getRecipeDetails(args.recipe_id);
         // Recipe Support Tools
@@ -176,6 +178,8 @@ export class ToolExecutor {
     switch (action) {
       case 'find':
         return this.searchSavedRecipes(query || '');
+      case 'list':
+        return this.listSavedRecipes();
       case 'details':
         if (!recipe_id) return { error: true, message: 'recipe_id required for details action' };
         return this.getRecipeDetails(recipe_id);
@@ -700,6 +704,36 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
     };
   }
 
+  /**
+   * Fix 1: List ALL saved recipes for the user (no query required)
+   */
+  async listSavedRecipes() {
+    const { data, error } = await this.context.supabase
+      .from('user_recipes')
+      .select('id, recipe_name, nutrition_data, servings')
+      .eq('user_id', this.context.userId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return {
+        message: 'You have no saved recipes yet.',
+        recipes: []
+      };
+    }
+
+    return {
+      message: `You have ${data.length} saved recipe(s).`,
+      recipes: data.map((r: any) => ({
+        id: r.id,
+        name: r.recipe_name,
+        servings: r.servings || 1,
+        calories_per_serving: r.nutrition_data?.calories ? Math.round(r.nutrition_data.calories / (r.servings || 1)) : 0
+      }))
+    };
+  }
+
   async getRecipeDetails(recipeId: string) {
     const [{ data: recipe }, ingredients] = await Promise.all([
       this.context.supabase.from('user_recipes').select('id, recipe_name, servings, nutrition_data').eq('id', recipeId).single(),
@@ -859,13 +893,22 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       servings: data.servings
     };
 
-    trackedKeys.forEach(key => {
+    // Fix 3A: Include standard nutrients (same as proposeFoodLog) to avoid missing fields in modal
+    const standardNutrients = [
+      'calories', 'protein_g', 'carbs_g', 'fat_total_g', 'hydration_ml',
+      'fiber_g', 'sugar_g', 'sodium_mg', 'cholesterol_mg', 'potassium_mg',
+      'fat_saturated_g', 'fat_trans_g', 'fat_mono_g', 'fat_poly_g'
+    ];
+    const allKeys = Array.from(new Set([...trackedKeys, ...standardNutrients]));
+
+    allKeys.forEach(key => {
       const value = this.getNutrientValue(data, key);
 
       if (value !== undefined) {
         const numValue = typeof value === 'number' ? value : parseFloat(value);
         filteredData[key] = !isNaN(numValue) ? Math.round(numValue * 10) / 10 : 0;
-      } else {
+      } else if (trackedKeys.includes(key)) {
+        // Only default to 0 for explicitly tracked goals
         filteredData[key] = 0;
       }
     });
