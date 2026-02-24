@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { TypingIndicator } from '@/components/LoadingIndicators';
@@ -48,7 +48,7 @@ interface ChatSessionMeta {
   updated_at: string;
 }
 
-export default function ChatPage() {
+function ChatContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, supabase, loading: authLoading, session } = useAuth();
@@ -491,5 +491,13 @@ export default function ChatPage() {
         />
       )}
     </DashboardShell>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center items-center h-screen"><TypingIndicator /></div>}>
+      <ChatContent />
+    </Suspense>
   );
 }
