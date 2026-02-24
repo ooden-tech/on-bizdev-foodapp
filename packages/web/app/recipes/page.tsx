@@ -310,8 +310,8 @@ export default function SavedRecipesPage() {
   };
 
   const handleSaveNewRecipe = async () => {
-    if (!newRecipe.name || !newRecipe.ingredients) {
-      setModalError("Recipe name and ingredients are required.");
+    if (!newRecipe.name || !newRecipe.ingredients || !supabase) {
+      setModalError(supabase ? "Recipe name and ingredients are required." : "Authentication error. Please try logging in again.");
       return;
     }
 
