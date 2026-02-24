@@ -501,6 +501,29 @@
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "propose_food_delete",
+      description: "Proposes deleting a previously logged food entry. Use when the user wants to remove, undo, or delete a food log. The user will see a confirmation before deletion. NEVER use propose_food_log for deletions.",
+      parameters: {
+        type: "object",
+        properties: {
+          food_name: {
+            type: "string",
+            description: "Name of the food to delete (will search today's logs for a match)"
+          },
+          log_id: {
+            type: "string",
+            description: "Optional: UUID of the specific log entry to delete, if known from context"
+          }
+        },
+        required: [
+          "food_name"
+        ]
+      }
+    }
+  },
   // =============================================================
   // CATEGORY 6: GOALS (3 tools)
   // =============================================================

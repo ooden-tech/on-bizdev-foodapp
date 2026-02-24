@@ -10,28 +10,21 @@ import {
     CartesianGrid,
     Tooltip,
     Legend,
-    ResponsiveContainer
+    ResponsiveContainer,
+    ReferenceArea
 } from 'recharts';
-import type { UserProfile } from 'shared';
 import DashboardShell from '@/components/DashboardShell';
-
-interface UserGoal {
-    nutrient: string;
-    target_value: number;
-    unit: string;
-    goal_type?: string;
-}
-
-interface DailyNutrientTotal {
-    day: string;
-    total: number;
-}
-
-interface AnalyticsSummary {
-    today: { value: number; percent: number };
-    weeklyAvg: { value: number; percent: number };
-    monthlyAvg: { value: number; percent: number };
-}
+import {
+    UserGoal,
+    FoodLogEntry,
+    NutrientAnalyticsData,
+    FocusItem,
+    processAllNutrientsData,
+    calculateFocusItem
+} from '@/utils/analytics-helpers';
+import NutrientSparklineCard from '@/components/analytics/NutrientSparklineCard';
+import FocusItemBanner from '@/components/analytics/FocusItemBanner';
+import NormalizedComparisonChart from '@/components/analytics/NormalizedComparisonChart';
 
 interface ChartPoint {
     label: string;
@@ -39,14 +32,10 @@ interface ChartPoint {
     Goal: number | null;
 }
 
-interface FoodLogEntry {
-    log_time: string;
-    [key: string]: unknown;
-}
-
 const formatDate = (date: Date): string => {
     return date.toISOString().split('T')[0];
 };
+
 const getPastDate = (daysAgo: number): Date => {
     const date = new Date();
     date.setDate(date.getDate() - daysAgo);
@@ -76,12 +65,14 @@ export default function AnalyticsPage() {
     const [loadingGoals, setLoadingGoals] = useState(true);
     const [loadingData, setLoadingData] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [selectedNutrient, setSelectedNutrient] = useState<string | null>(null);
+
     const [trackedNutrientsList, setTrackedNutrientsList] = useState<UserGoal[]>([]);
-    const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | null>(null);
-    const [weeklyChartData, setWeeklyChartData] = useState<ChartPoint[] | null>(null);
-    const [monthlyChartData, setMonthlyChartData] = useState<ChartPoint[] | null>(null);
-    const [currentGoal, setCurrentGoal] = useState<UserGoal | null>(null);
+
+    // Tab and Data State
+    const [activeTab, setActiveTab] = useState<'overview' | 'details'>('overview');
+    const [selectedNutrient, setSelectedNutrient] = useState<string | null>(null);
+    const [analyticsData, setAnalyticsData] = useState<Record<string, NutrientAnalyticsData> | null>(null);
+    const [focusItem, setFocusItem] = useState<FocusItem | null>(null);
 
     const loadTrackedNutrients = useCallback(async () => {
         if (!user || !supabase) {
@@ -113,8 +104,6 @@ export default function AnalyticsPage() {
             }
 
         } catch (err: unknown) {
-            console.error("Full error object loading tracked nutrients:", err);
-            console.error("Error loading tracked nutrients:", err);
             const errorMessage = err instanceof Error ? err.message : String(err);
             setError(`Failed to load nutrient goals: ${errorMessage}`);
         } finally {
@@ -123,24 +112,11 @@ export default function AnalyticsPage() {
     }, [user, supabase]);
 
     const fetchAnalyticsData = useCallback(async () => {
-        if (!user || !supabase || !selectedNutrient) {
-            setError("Cannot fetch analytics data: missing user, service, or selected nutrient.");
+        if (!user || !supabase || trackedNutrientsList.length === 0) {
             return;
         }
         setLoadingData(true);
         setError(null);
-
-        const currentGoal = trackedNutrientsList.find(g => g.nutrient === selectedNutrient);
-        setCurrentGoal(currentGoal || null);
-
-        if (!currentGoal) {
-            setError(`Goal not found for ${selectedNutrient}. Unable to calculate analytics.`);
-            setLoadingData(false);
-            setAnalyticsSummary(null);
-            setWeeklyChartData(null);
-            setMonthlyChartData(null);
-            return;
-        }
 
         const today = new Date();
         const thirtyDaysAgo = getPastDate(29);
@@ -148,7 +124,6 @@ export default function AnalyticsPage() {
         const endRange = today.toISOString();
 
         try {
-            console.log(`Fetching food_log for ${selectedNutrient} between ${startRange} and ${endRange}`);
             const { data, error: logError } = await supabase
                 .from('food_log')
                 .select('*')
@@ -159,107 +134,21 @@ export default function AnalyticsPage() {
 
             if (logError) throw logError;
 
-            const rawLogs: FoodLogEntry[] | null = data as any;
+            const rawLogs: FoodLogEntry[] = (data || []) as any;
+            const processedData = processAllNutrientsData(rawLogs, trackedNutrientsList);
 
-            console.log("Fetched raw logs:", rawLogs);
-
-            const dailyTotalsMap = new Map<string, number>();
-            if (Array.isArray(rawLogs)) {
-                rawLogs.forEach(log => {
-                    if (log && typeof log.log_time === 'string' && typeof log[selectedNutrient] === 'number') {
-                        const day = log.log_time.split('T')[0];
-                        const value = log[selectedNutrient] as number;
-                        const currentTotal = dailyTotalsMap.get(day) || 0;
-                        dailyTotalsMap.set(day, currentTotal + value);
-                    } else {
-                        console.warn("Skipping invalid log entry or missing nutrient value:", log);
-                    }
-                });
-            }
-            for (let i = 29; i >= 0; i--) {
-                const date = getPastDate(i);
-                const dateStr = formatDate(date);
-                if (!dailyTotalsMap.has(dateStr)) {
-                    dailyTotalsMap.set(dateStr, 0);
-                }
-            }
-
-            const dailyTotals: DailyNutrientTotal[] = Array.from(dailyTotalsMap, ([day, total]) => ({ day, total }))
-                .sort((a, b) => a.day.localeCompare(b.day));
-
-            console.log("Aggregated daily totals:", dailyTotals);
-
-            if (dailyTotals.length === 0) {
-                console.log("No aggregated totals found for the selected period and nutrient.");
-                setAnalyticsSummary({
-                    today: { value: 0, percent: 0 },
-                    weeklyAvg: { value: 0, percent: 0 },
-                    monthlyAvg: { value: 0, percent: 0 },
-                });
-                setWeeklyChartData([]);
-                setMonthlyChartData([]);
-                setError(null);
-                setLoadingData(false);
-                return;
-            }
-
-            const todayStr = formatDate(new Date());
-            const sevenDaysAgoStr = formatDate(getPastDate(6));
-
-            const todayData = dailyTotals.find(d => d.day === todayStr);
-            const todayValue = todayData?.total || 0;
-            const todayPercent = currentGoal.target_value > 0 ? (todayValue / currentGoal.target_value) * 100 : 0;
-
-            const weeklyData = dailyTotals.filter(d => d.day >= sevenDaysAgoStr);
-            const weeklyTotal = weeklyData.reduce((sum, d) => sum + d.total, 0);
-            const weeklyAvgValue = weeklyData.length > 0 ? weeklyTotal / weeklyData.length : 0;
-            const weeklyAvgPercent = currentGoal.target_value > 0 ? (weeklyAvgValue / currentGoal.target_value) * 100 : 0;
-
-            const monthlyData = dailyTotals;
-            const monthlyTotal = monthlyData.reduce((sum, d) => sum + d.total, 0);
-            const monthlyAvgValue = monthlyData.length > 0 ? monthlyTotal / monthlyData.length : 0;
-            const monthlyAvgPercent = currentGoal.target_value > 0 ? (monthlyAvgValue / currentGoal.target_value) * 100 : 0;
-
-            setAnalyticsSummary({
-                today: { value: todayValue, percent: todayPercent },
-                weeklyAvg: { value: weeklyAvgValue, percent: weeklyAvgPercent },
-                monthlyAvg: { value: monthlyAvgValue, percent: monthlyAvgPercent },
-            });
-
-            const goalValue = currentGoal.target_value;
-            const weeklyChart: ChartPoint[] = [];
-            for (let i = 6; i >= 0; i--) {
-                const date = getPastDate(i);
-                const dateStr = formatDate(date);
-                const dayData = dailyTotalsMap.get(dateStr);
-                weeklyChart.push({
-                    label: date.toLocaleDateString('en-US', { weekday: 'short' }),
-                    Actual: dayData !== undefined ? dayData : null,
-                    Goal: goalValue
-                });
-            }
-            setWeeklyChartData(weeklyChart);
-
-            const monthlyChart: ChartPoint[] = dailyTotals.map(item => ({
-                label: new Date(item.day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                Actual: item.total,
-                Goal: goalValue
-            }));
-            setMonthlyChartData(monthlyChart);
+            setAnalyticsData(processedData);
+            setFocusItem(calculateFocusItem(processedData));
 
         } catch (err: unknown) {
-            console.error("Full error object fetching/processing analytics data:", err);
-            console.error(`Error fetching/processing analytics data for ${selectedNutrient}:`, err);
             const errorMessage = err instanceof Error ? err.message : String(err);
             setError(`Failed to load analytics: ${errorMessage}`);
-            setAnalyticsSummary(null);
-            setWeeklyChartData(null);
-            setMonthlyChartData(null);
-            setCurrentGoal(null);
+            setAnalyticsData(null);
+            setFocusItem(null);
         } finally {
             setLoadingData(false);
         }
-    }, [user, supabase, selectedNutrient, trackedNutrientsList]);
+    }, [user, supabase, trackedNutrientsList]);
 
     useEffect(() => {
         if (!authLoading && user) {
@@ -268,16 +157,16 @@ export default function AnalyticsPage() {
     }, [authLoading, user, loadTrackedNutrients]);
 
     useEffect(() => {
-        if (selectedNutrient && !loadingGoals) {
+        if (!loadingGoals && trackedNutrientsList.length > 0) {
             fetchAnalyticsData();
         }
-    }, [selectedNutrient, loadingGoals, fetchAnalyticsData]);
+    }, [loadingGoals, fetchAnalyticsData, trackedNutrientsList.length]);
 
     if (authLoading || loadingGoals) {
-        return <div className="flex h-screen items-center justify-center"><p>Loading Analytics Setup...</p></div>;
+        return <div className="flex h-screen items-center justify-center"><p className="text-gray-500">Loading Analytics Setup...</p></div>;
     }
     if (!user) {
-        return <div className="flex h-screen items-center justify-center"><p>Please log in to view analytics.</p></div>;
+        return <div className="flex h-screen items-center justify-center"><p className="text-gray-500">Please log in to view analytics.</p></div>;
     }
 
     const getNutrientName = (key: string | null): string => {
@@ -287,150 +176,228 @@ export default function AnalyticsPage() {
         return trackedNutrientsList.find(n => n.nutrient === key)?.unit || '';
     };
 
+    // Helper for generating chart data mapped for recharts specifically
+    const getChartDataForNutrient = (nutrientKey: string, days: number): ChartPoint[] => {
+        if (!analyticsData || !analyticsData[nutrientKey]) return [];
+        const nData = analyticsData[nutrientKey];
+        const subset = nData.dailyTotals.slice(-days);
+        return subset.map(item => ({
+            label: days === 7
+                ? new Date(item.day + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
+                : new Date(item.day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            Actual: item.total,
+            Goal: nData.goal.target_value
+        }));
+    };
+
+    const renderReferenceAreas = (goalType: string | undefined, targetValue: number, yDomainMax: number) => {
+        const isLimit = goalType === 'limit';
+        // Need extreme subtlety to avoid overwhelming UI. Use fillOpacity=0.03
+        if (isLimit) {
+            return (
+                <React.Fragment>
+                    <ReferenceArea y1={0} y2={targetValue * 0.75} fill="#10b981" fillOpacity={0.03} />
+                    <ReferenceArea y1={targetValue * 0.75} y2={targetValue} fill="#f59e0b" fillOpacity={0.03} />
+                    <ReferenceArea y1={targetValue} y2={yDomainMax} fill="#ef4444" fillOpacity={0.03} />
+                </React.Fragment>
+            );
+        } else {
+            return (
+                <React.Fragment>
+                    <ReferenceArea y1={0} y2={targetValue * 0.5} fill="#ef4444" fillOpacity={0.03} />
+                    <ReferenceArea y1={targetValue * 0.5} y2={targetValue * 0.75} fill="#f59e0b" fillOpacity={0.03} />
+                    <ReferenceArea y1={targetValue * 0.75} y2={yDomainMax} fill="#10b981" fillOpacity={0.03} />
+                </React.Fragment>
+            );
+        }
+    };
+
     return (
         <DashboardShell headerTitle="Nutrition Analytics">
-            {/* Nutrient Selector */}
-            <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200 shadow-sm max-w-sm">
-                <label htmlFor="nutrient-select" className="block text-base font-medium text-gray-800 mb-2">Select Nutrient</label>
-                <select
-                    id="nutrient-select"
-                    value={selectedNutrient || ''}
-                    onChange={(e) => setSelectedNutrient(e.target.value)}
-                    disabled={loadingGoals || trackedNutrientsList.length === 0}
-                    className="mt-1 block w-full pl-4 pr-10 py-2.5 text-base text-gray-900 border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md disabled:bg-gray-100 disabled:cursor-not-allowed"
-                >
-                    {trackedNutrientsList.length === 0 && !loadingGoals && (
-                        <option value="" disabled>No goals set</option>
-                    )}
-                    {trackedNutrientsList.map(goal => (
-                        <option key={goal.nutrient} value={goal.nutrient}>
-                            {goal.nutrient.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                        </option>
-                    ))}
-                </select>
+            {/* TABS */}
+            <div className="border-b border-gray-200 mb-6">
+                <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                    <button
+                        onClick={() => setActiveTab('overview')}
+                        className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'overview'
+                                ? 'border-blue-500 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                            }`}
+                    >
+                        Overview
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('details')}
+                        className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'details'
+                                ? 'border-blue-500 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                            }`}
+                    >
+                        Detailed View
+                    </button>
+                </nav>
             </div>
 
             {loadingData && (
-                <div className="flex items-center justify-center py-10"><p>Loading analytics data...</p></div>
+                <div className="flex flex-col items-center justify-center py-20">
+                    <div className="relative w-10 h-10 mb-4">
+                        <div className="absolute top-0 left-0 right-0 bottom-0 border-4 border-blue-100 rounded-full"></div>
+                        <div className="absolute top-0 left-0 right-0 bottom-0 border-4 border-transparent border-t-blue-600 rounded-full animate-spin"></div>
+                    </div>
+                    <p className="text-gray-500">Compiling your nutritional data...</p>
+                </div>
             )}
+
             {error && !loadingData && (
-                <div className="mb-6 p-3 bg-red-100 text-red-700 rounded-md border border-red-300">
-                    Error: {error}
+                <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-md border border-red-200 shadow-sm">
+                    <strong>Error:</strong> {error}
                 </div>
             )}
 
-            {!loadingData && !error && selectedNutrient && analyticsSummary && currentGoal && (
-                <div className="space-y-8">
-                    <section>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Summary for {getNutrientName(selectedNutrient)}</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                                <h4 className="text-sm font-medium text-gray-500 mb-1">Today</h4>
-                                <p className="text-xl font-semibold text-gray-900">{analyticsSummary.today.value.toFixed(1)} {getNutrientUnit(selectedNutrient)}</p>
-                                <p className="text-sm text-gray-600">({analyticsSummary.today.percent.toFixed(0)}% of goal)</p>
-                            </div>
-                            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                                <h4 className="text-sm font-medium text-gray-500 mb-1">Weekly Average</h4>
-                                <p className="text-xl font-semibold text-gray-900">{analyticsSummary.weeklyAvg.value.toFixed(1)} {getNutrientUnit(selectedNutrient)}</p>
-                                <p className="text-sm text-gray-600">({analyticsSummary.weeklyAvg.percent.toFixed(0)}% of goal)</p>
-                            </div>
-                            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                                <h4 className="text-sm font-medium text-gray-500 mb-1">Monthly Average</h4>
-                                <p className="text-xl font-semibold text-gray-900">{analyticsSummary.monthlyAvg.value.toFixed(1)} {getNutrientUnit(selectedNutrient)}</p>
-                                <p className="text-sm text-gray-600">({analyticsSummary.monthlyAvg.percent.toFixed(0)}% of goal)</p>
-                            </div>
-                        </div>
-                    </section>
+            {!loadingData && !error && analyticsData && Object.keys(analyticsData).length > 0 && (
+                <div className="pb-10">
+                    {/* OVERVIEW TAB */}
+                    {activeTab === 'overview' && (
+                        <div className="space-y-8 animate-in fade-in duration-300">
+                            {/* Focus Banner */}
+                            <FocusItemBanner
+                                focusItem={focusItem}
+                                onClick={focusItem ? () => {
+                                    setSelectedNutrient(focusItem.nutrient);
+                                    setActiveTab('details');
+                                } : undefined}
+                            />
 
-                    <section>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Trends</h3>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm min-h-[350px]">
-                                <h4 className="text-md font-medium text-gray-600 mb-4">Last 7 Days Trend</h4>
-                                {weeklyChartData && weeklyChartData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height={300}>
-                                        <LineChart data={weeklyChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                                            <XAxis dataKey="label" fontSize={12} />
-                                            <YAxis
-                                                fontSize={12}
-                                                domain={calculateYAxisDomain(weeklyChartData, currentGoal?.target_value || 0, selectedNutrient)}
-                                                allowDecimals={false}
-                                                tickCount={6}
-                                            />
-                                            <Tooltip
-                                                formatter={(value: number) => `${value.toFixed(1)} ${getNutrientUnit(selectedNutrient)}`}
-                                                labelFormatter={(label) => `Day: ${label}`}
-                                            />
-                                            <Legend />
-                                            <Line
-                                                type="monotone"
-                                                dataKey="Actual"
-                                                stroke="#3b82f6"
-                                                strokeWidth={2}
-                                                dot={{ r: 4 }}
-                                                activeDot={{ r: 6 }}
-                                            />
-                                            <Line
-                                                type="monotone"
-                                                dataKey="Goal"
-                                                stroke="#ef4444"
-                                                strokeWidth={1}
-                                                strokeDasharray="5 5"
-                                                dot={false}
-                                                activeDot={false}
-                                            />
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                ) : <p className="text-gray-500 text-sm text-center pt-10">No weekly data available to display chart.</p>}
-                            </div>
-                            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm min-h-[350px]">
-                                <h4 className="text-md font-medium text-gray-600 mb-4">Last 30 Days Trend</h4>
-                                {monthlyChartData && monthlyChartData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height={300}>
-                                        <LineChart data={monthlyChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                                            <XAxis dataKey="label" fontSize={12} tickCount={6} />
-                                            <YAxis
-                                                fontSize={12}
-                                                domain={calculateYAxisDomain(monthlyChartData, currentGoal?.target_value || 0, selectedNutrient)}
-                                                allowDecimals={false}
-                                                tickCount={6}
-                                            />
-                                            <Tooltip
-                                                formatter={(value: number) => `${value.toFixed(1)} ${getNutrientUnit(selectedNutrient)}`}
-                                                labelFormatter={(label) => `Date: ${label}`}
-                                            />
-                                            <Legend />
-                                            <Line
-                                                type="monotone"
-                                                dataKey="Actual"
-                                                stroke="#10b981"
-                                                strokeWidth={2}
-                                                dot={false}
-                                                activeDot={{ r: 6 }}
-                                            />
-                                            <Line
-                                                type="monotone"
-                                                dataKey="Goal"
-                                                stroke="#f97316"
-                                                strokeWidth={1}
-                                                strokeDasharray="5 5"
-                                                dot={false}
-                                                activeDot={false}
-                                            />
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                ) : <p className="text-gray-500 text-sm text-center pt-10">No monthly data available to display chart.</p>}
+                            {/* Normalized All-in-one Chart */}
+                            <NormalizedComparisonChart analyticsData={analyticsData} />
+
+                            {/* Sparkline Grid */}
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">All Tracked Nutrients</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                    {Object.values(analyticsData).map(data => (
+                                        <NutrientSparklineCard
+                                            key={data.nutrient}
+                                            data={data}
+                                            onClick={(n) => {
+                                                setSelectedNutrient(n);
+                                                setActiveTab('details');
+                                            }}
+                                            isSelected={false}
+                                        />
+                                    ))}
+                                </div>
                             </div>
                         </div>
-                    </section>
+                    )}
+
+                    {/* DETAILS TAB */}
+                    {activeTab === 'details' && selectedNutrient && analyticsData[selectedNutrient] && (
+                        <div className="space-y-6 animate-in fade-in duration-300">
+                            {/* Nutrient Selector for Details View */}
+                            <div className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm max-w-sm">
+                                <label htmlFor="nutrient-select" className="block text-sm font-medium text-gray-700 mb-2">Detailed view for:</label>
+                                <select
+                                    id="nutrient-select"
+                                    value={selectedNutrient || ''}
+                                    onChange={(e) => setSelectedNutrient(e.target.value)}
+                                    className="block w-full pl-3 pr-10 py-2 text-base text-gray-900 border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md bg-gray-50 cursor-pointer"
+                                >
+                                    {trackedNutrientsList.map(goal => (
+                                        <option key={goal.nutrient} value={goal.nutrient}>
+                                            {goal.nutrient.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Using variable to keep code cleaner */}
+                            {(() => {
+                                const activeData = analyticsData[selectedNutrient];
+                                const currentGoal = activeData.goal;
+                                const weeklyChartData = getChartDataForNutrient(selectedNutrient, 7);
+                                const monthlyChartData = getChartDataForNutrient(selectedNutrient, 30);
+
+                                const yDomainWeekly = calculateYAxisDomain(weeklyChartData, currentGoal.target_value, selectedNutrient);
+                                const yDomainMonthly = calculateYAxisDomain(monthlyChartData, currentGoal.target_value, selectedNutrient);
+
+                                return (
+                                    <React.Fragment>
+                                        {/* Summary Cards */}
+                                        <section>
+                                            <h3 className="text-lg font-semibold text-gray-800 mb-3">Summary for {getNutrientName(selectedNutrient)}</h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                                                    <h4 className="text-sm font-medium text-gray-500 mb-1">Today</h4>
+                                                    <p className="text-xl font-semibold text-gray-900">{activeData.today.value.toFixed(1)} {getNutrientUnit(selectedNutrient)}</p>
+                                                    <p className="text-sm text-gray-600">({activeData.today.percent.toFixed(0)}% of goal)</p>
+                                                </div>
+                                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                                                    <h4 className="text-sm font-medium text-gray-500 mb-1">Weekly Average</h4>
+                                                    <p className="text-xl font-semibold text-gray-900">{activeData.weeklyAvg.value.toFixed(1)} {getNutrientUnit(selectedNutrient)}</p>
+                                                    <p className="text-sm text-gray-600">({activeData.weeklyAvg.percent.toFixed(0)}% of goal)</p>
+                                                </div>
+                                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                                                    <h4 className="text-sm font-medium text-gray-500 mb-1">Monthly Average</h4>
+                                                    <p className="text-xl font-semibold text-gray-900">{activeData.monthlyAvg.value.toFixed(1)} {getNutrientUnit(selectedNutrient)}</p>
+                                                    <p className="text-sm text-gray-600">({activeData.monthlyAvg.percent.toFixed(0)}% of goal)</p>
+                                                </div>
+                                            </div>
+                                        </section>
+
+                                        {/* Trends Charts */}
+                                        <section>
+                                            <h3 className="text-lg font-semibold text-gray-800 mb-3">Trends</h3>
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm min-h-[350px]">
+                                                    <h4 className="text-md font-medium text-gray-600 mb-4">Last 7 Days Trend</h4>
+                                                    {weeklyChartData.length > 0 ? (
+                                                        <ResponsiveContainer width="100%" height={300}>
+                                                            <LineChart data={weeklyChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                                                                {renderReferenceAreas(currentGoal.goal_type, currentGoal.target_value, yDomainWeekly[1] as number)}
+                                                                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                                                                <XAxis dataKey="label" fontSize={12} />
+                                                                <YAxis fontSize={12} domain={yDomainWeekly} allowDecimals={false} tickCount={6} />
+                                                                <Tooltip formatter={(value: number) => `${value.toFixed(1)} ${getNutrientUnit(selectedNutrient)}`} labelFormatter={(label) => `Day: ${label}`} />
+                                                                <Legend />
+                                                                <Line type="monotone" dataKey="Actual" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                                                                <Line type="monotone" dataKey="Goal" stroke="#ef4444" strokeWidth={1} strokeDasharray="5 5" dot={false} activeDot={false} />
+                                                            </LineChart>
+                                                        </ResponsiveContainer>
+                                                    ) : <p className="text-gray-500 text-sm text-center pt-10">No weekly data available to display chart.</p>}
+                                                </div>
+
+                                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm min-h-[350px]">
+                                                    <h4 className="text-md font-medium text-gray-600 mb-4">Last 30 Days Trend</h4>
+                                                    {monthlyChartData.length > 0 ? (
+                                                        <ResponsiveContainer width="100%" height={300}>
+                                                            <LineChart data={monthlyChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                                                                {renderReferenceAreas(currentGoal.goal_type, currentGoal.target_value, yDomainMonthly[1] as number)}
+                                                                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                                                                <XAxis dataKey="label" fontSize={12} tickCount={6} />
+                                                                <YAxis fontSize={12} domain={yDomainMonthly} allowDecimals={false} tickCount={6} />
+                                                                <Tooltip formatter={(value: number) => `${value.toFixed(1)} ${getNutrientUnit(selectedNutrient)}`} labelFormatter={(label) => `Date: ${label}`} />
+                                                                <Legend />
+                                                                <Line type="monotone" dataKey="Actual" stroke="#10b981" strokeWidth={2} dot={false} activeDot={{ r: 6 }} />
+                                                                <Line type="monotone" dataKey="Goal" stroke="#f97316" strokeWidth={1} strokeDasharray="5 5" dot={false} activeDot={false} />
+                                                            </LineChart>
+                                                        </ResponsiveContainer>
+                                                    ) : <p className="text-gray-500 text-sm text-center pt-10">No monthly data available to display chart.</p>}
+                                                </div>
+                                            </div>
+                                        </section>
+                                    </React.Fragment>
+                                );
+                            })()}
+                        </div>
+                    )}
                 </div>
             )}
 
-            {!selectedNutrient && !loadingGoals && !error && (
-                <div className="text-center py-10">
-                    <p className="text-gray-600">Please select a nutrient to view analytics.</p>
+            {!selectedNutrient && !loadingGoals && !error && Object.keys(analyticsData || {}).length === 0 && (
+                <div className="text-center py-20 fade-in duration-300">
+                    <p className="text-gray-500">No tracked nutrients or food logs found.</p>
+                    <p className="text-gray-400 text-sm mt-2">Set up some goals in Settings to see your analytics here.</p>
                 </div>
             )}
         </DashboardShell>

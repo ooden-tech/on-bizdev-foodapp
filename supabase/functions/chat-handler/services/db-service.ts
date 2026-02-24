@@ -531,4 +531,66 @@ export class DbService {
       throw error;
     }
   }
+
+  /**
+   * Deletes a food log entry by ID (scoped to user for safety).
+   * Returns the deleted row for confirmation messaging.
+   */
+  async deleteFoodLog(userId: string, foodLogId: string) {
+    // First fetch the row so we can return it for the confirmation message
+    const { data: existing, error: fetchError } = await this.supabase
+      .from('food_log')
+      .select('id, food_name, calories, portion')
+      .eq('id', foodLogId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('[DbService] Error fetching food log for deletion:', fetchError);
+      throw fetchError;
+    }
+    if (!existing) {
+      return null; // Not found or not owned by user
+    }
+
+    const { error } = await this.supabase
+      .from('food_log')
+      .delete()
+      .eq('id', foodLogId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('[DbService] Error deleting food log:', error);
+      throw error;
+    }
+
+    console.log(`[DbService] Deleted food log: ${existing.food_name} (${existing.id})`);
+    return existing;
+  }
+
+  /**
+   * Finds the most recent food log entry matching a name (today only).
+   * Case-insensitive partial match, scoped to user's timezone.
+   */
+  async findFoodLogByName(userId: string, foodName: string, timezone: string = 'UTC') {
+    const { start, end } = getStartAndEndOfDay(new Date(), timezone);
+
+    const { data, error } = await this.supabase
+      .from('food_log')
+      .select('id, food_name, calories, portion, log_time')
+      .eq('user_id', userId)
+      .gte('log_time', start)
+      .lte('log_time', end)
+      .ilike('food_name', `%${foodName}%`)
+      .order('log_time', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[DbService] Error finding food log by name:', error);
+      throw error;
+    }
+
+    return data;
+  }
 }

@@ -405,6 +405,11 @@ function decorateWithContext(message: string, pendingAction: any): string {
         await sessionService.clearPendingAction(userId);
         console.log(`[OrchestratorV3] Routing ${intent} to ReasoningAgent`);
         break;
+      case 'delete_food':
+        // Route deletion requests to ReasoningAgent which has the propose_food_delete tool
+        await sessionService.clearPendingAction(userId);
+        console.log('[OrchestratorV3] Routing delete_food to ReasoningAgent');
+        break;
     }
     // =========================================================
     // STEP 4: ReasoningAgent - Fallback (Complex cases)
@@ -739,6 +744,37 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
             }
           };
         }
+
+      case 'food_delete':
+        // Handle food log deletion confirmation
+        if (!data.log_id) {
+          await sessionService.clearPendingAction(userId);
+          return {
+            status: 'error',
+            message: 'Could not find the food log entry to delete. Please try again.',
+            response_type: 'error'
+          };
+        }
+
+        const deletedEntry = await db.deleteFoodLog(userId, data.log_id);
+        await sessionService.clearPendingAction(userId);
+
+        if (!deletedEntry) {
+          return {
+            status: 'error',
+            message: 'The food log entry was not found or has already been removed.',
+            response_type: 'error'
+          };
+        }
+
+        return {
+          status: 'success',
+          message: `✅ Removed ${deletedEntry.food_name} (${Math.round(deletedEntry.calories || 0)} cal) from your log! 🗑️`,
+          response_type: 'food_deleted',
+          data: {
+            food_deleted: deletedEntry
+          }
+        };
 
       case 'bulk_goal_update':
         await db.updateUserGoals(userId, data.goals);

@@ -185,11 +185,21 @@ export class InsightAgent {
     const daysWithData = Object.keys(analysisData.dailyTotals).length;
     console.log(`[InsightAgent] executeSummary: ${daysWithData} days with data out of ${days} requested`);
 
+    // Trim daily totals to key nutrients only to reduce token count and avoid timeout
+    const keyNutrients = ['calories', 'protein_g', 'carbs_g', 'fat_total_g', 'fiber_g', 'sugar_g', 'sodium_mg', 'hydration_ml'];
+    const trimmedTotals: Record<string, any> = {};
+    for (const [date, data] of Object.entries(analysisData.dailyTotals) as [string, any][]) {
+      trimmedTotals[date] = { items: data.items };
+      for (const k of keyNutrients) {
+        if (data[k] !== undefined) trimmedTotals[date][k] = Math.round(data[k] * 10) / 10;
+      }
+    }
+
     const summaryPrompt = `
     You are a Nutrition Summary Analyst. Provide a comprehensive yet concise progress summary.
     
     Period: Last ${days} days (${daysWithData} days have logged data)
-    Daily Totals by Date: ${JSON.stringify(analysisData.dailyTotals)}
+    Daily Totals by Date: ${JSON.stringify(trimmedTotals)}
     User Goals: ${JSON.stringify(goals || 'No goals set')}
     Day Classifications: ${JSON.stringify(analysisData.classifications)}
     
@@ -209,10 +219,13 @@ export class InsightAgent {
 
     const openai = createOpenAIClient();
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: summaryPrompt },
       ],
+      max_tokens: 800
+    }, {
+      timeout: 25000
     });
 
     return {

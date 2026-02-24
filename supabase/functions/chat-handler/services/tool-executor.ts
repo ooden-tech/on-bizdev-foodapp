@@ -91,6 +91,8 @@ export class ToolExecutor {
           return this.proposeFoodLog(args);
         case 'propose_recipe_log':
           return this.proposeRecipeLog(args);
+        case 'propose_food_delete':
+          return this.proposeFoodDelete(args);
         case 'confirm_pending_log':
           return this.confirmPendingLog(args.proposal_id);
         case 'update_user_profile':
@@ -929,6 +931,56 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       pending: true,
       data: filteredData,
       message: `Ready to log ${data.servings} serving(s) of ${data.recipe_name} (${Math.round(filteredData.calories)} cal). Please confirm.`
+    };
+  }
+
+  /**
+   * Proposes deleting a food log entry (PCC pattern for deletion).
+   * Finds the most recent matching entry from today's logs and creates a pending deletion proposal.
+   */
+  async proposeFoodDelete(args: { food_name: string, log_id?: string }) {
+    const { food_name, log_id } = args;
+    const timezone = this.context.timezone || 'UTC';
+    console.log(`[ToolExecutor] proposeFoodDelete input:`, args);
+
+    let logEntry: any = null;
+
+    // If log_id is provided, look up directly
+    if (log_id) {
+      const { data, error } = await this.context.supabase
+        .from('food_log')
+        .select('id, food_name, calories, portion, log_time')
+        .eq('id', log_id)
+        .eq('user_id', this.context.userId)
+        .maybeSingle();
+      if (!error && data) logEntry = data;
+    }
+
+    // Otherwise, search by name in today's logs
+    if (!logEntry) {
+      logEntry = await this.db.findFoodLogByName(this.context.userId, food_name, timezone);
+    }
+
+    if (!logEntry) {
+      return {
+        error: true,
+        message: `No food log entry matching "${food_name}" found in today's logs. Please check the name and try again.`
+      };
+    }
+
+    const proposalId = `delete_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    return {
+      proposal_type: 'food_delete',
+      proposal_id: proposalId,
+      pending: true,
+      data: {
+        log_id: logEntry.id,
+        food_name: logEntry.food_name,
+        calories: logEntry.calories,
+        portion: logEntry.portion
+      },
+      message: `Found "${logEntry.food_name}" (${Math.round(logEntry.calories || 0)} cal). Confirm to delete this entry.`
     };
   }
 
