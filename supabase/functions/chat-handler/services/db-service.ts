@@ -139,8 +139,16 @@ export class DbService {
    */
   async updateUserGoals(userId: string, goals: any[]) {
     console.log('[DbService] updateUserGoals called with:', JSON.stringify(goals));
-    const goalsToSet = goals.filter(g => !g.action || g.action === 'set');
-    const goalsToRemove = goals.filter(g => g.action === 'remove');
+
+    // Deduplicate goals by nutrient before processing (safety net for old proposals)
+    const goalMap = new Map<string, any>();
+    for (const g of goals) {
+      if (g) goalMap.set(g.nutrient, g);
+    }
+    const deduplicatedGoals = Array.from(goalMap.values());
+
+    const goalsToSet = deduplicatedGoals.filter(g => !g.action || g.action === 'set');
+    const goalsToRemove = deduplicatedGoals.filter(g => g.action === 'remove');
 
     // 1. Handle Removals
     if (goalsToRemove.length > 0) {
