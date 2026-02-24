@@ -1,5 +1,5 @@
 import React from 'react';
-import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
+import { BarChart, Bar, ResponsiveContainer, YAxis, ReferenceLine } from 'recharts';
 import { NutrientAnalyticsData } from '@/utils/analytics-helpers';
 import { formatNutrientName, formatNutrientValue } from '@/utils/formatting';
 
@@ -10,7 +10,7 @@ interface NutrientSparklineCardProps {
 }
 
 export default function NutrientSparklineCard({ data, onClick, isSelected }: NutrientSparklineCardProps) {
-    const { nutrient, goal, dailyTotals, today, streak } = data;
+    const { nutrient, goal, dailyTotals, weeklyAvg, streak } = data;
     const isLimit = goal.goal_type === 'limit';
 
     // For the 7-day sparkline
@@ -20,8 +20,8 @@ export default function NutrientSparklineCard({ data, onClick, isSelected }: Nut
     const maxVal = Math.max(...sparklineData.map(d => d.total), goal.target_value);
     const yDomain = [0, maxVal * 1.1];
 
-    // Status colors based on today's value vs target
-    const fraction = goal.target_value > 0 ? (today.value / goal.target_value) : 0;
+    // Status colors based on 7-day average vs target
+    const fraction = goal.target_value > 0 ? (weeklyAvg.value / goal.target_value) : 0;
 
     let ringColor = 'ring-gray-200 border-gray-200';
     let progressColor = 'bg-gray-400';
@@ -61,7 +61,7 @@ export default function NutrientSparklineCard({ data, onClick, isSelected }: Nut
         ringColor = 'ring-2 ring-blue-500 border-blue-500 shadow-md';
     }
 
-    const barWidth = Math.min(today.percent, 100);
+    const barWidth = Math.min(weeklyAvg.percent, 100);
 
     return (
         <div
@@ -87,40 +87,39 @@ export default function NutrientSparklineCard({ data, onClick, isSelected }: Nut
             <div className="mt-3">
                 <div className="flex items-baseline gap-1">
                     <span className="text-xl font-extrabold text-gray-900">
-                        {formatNutrientValue(nutrient, today.value)}
+                        {formatNutrientValue(nutrient, weeklyAvg.value)}
                     </span>
                     <span className="text-sm text-gray-500">
                         / {formatNutrientValue(nutrient, goal.target_value)} {goal.unit}
                     </span>
                 </div>
 
-                {/* Tiny Progress Bar for Today */}
+                {/* Tiny Progress Bar for Weekly Average */}
                 <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2 overflow-hidden">
                     <div
                         className={`h-full ${progressColor}`}
                         style={{ width: `${barWidth}%` }}
                     />
                 </div>
+                <div className="text-[10px] text-gray-400 mt-1 uppercase tracking-wider font-semibold">
+                    7-Day Avg
+                </div>
             </div>
 
-            {/* Sparkline */}
-            <div className="h-12 mt-4 opacity-80">
+            {/* Sparkline Bar Chart */}
+            <div className="h-14 mt-4 opacity-90">
                 <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={sparklineData}>
+                    <BarChart data={sparklineData}>
                         <YAxis domain={yDomain} hide />
-                        <Line
-                            type="monotone"
+                        <ReferenceLine y={goal.target_value} stroke="#d1d5db" strokeDasharray="3 3" />
+                        <Bar
                             dataKey="total"
-                            stroke={lineStroke}
-                            strokeWidth={2}
-                            dot={false}
+                            fill={lineStroke}
+                            radius={[2, 2, 0, 0]}
                             isAnimationActive={false}
                         />
-                    </LineChart>
+                    </BarChart>
                 </ResponsiveContainer>
-            </div>
-            <div className="text-[10px] text-gray-400 text-center mt-1">
-                7-day trend
             </div>
         </div>
     );

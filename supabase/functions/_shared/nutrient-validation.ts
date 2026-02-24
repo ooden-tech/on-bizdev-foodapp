@@ -271,9 +271,9 @@ export const normalizeNutrientKey = (key: string): string => {
     // 2. Fallback for suffixes & common patterns
     if (k.includes('protein')) return 'protein_g';
     if (k.includes('carb')) return 'carbs_g';
-    if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
     if (k.includes('fat') && k.includes('poly')) return 'fat_poly_g';
     if (k.includes('fat') && k.includes('mono')) return 'fat_mono_g';
+    if (k.includes('fat') && k.includes('sat')) return 'fat_saturated_g';
     if (k.includes('fat') && !k.includes('total')) return 'fat_total_g';
     if (k.includes('fiber')) return 'fiber_g';
     if (k.includes('sugar')) return 'sugar_g';

@@ -1214,6 +1214,13 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       };
     }).filter(g => g !== null);
 
+    // Deduplicate goals by nutrient (keep the last one if duplicates exist)
+    const goalMap = new Map<string, any>();
+    for (const g of processedGoals) {
+      if (g) goalMap.set(g.nutrient, g);
+    }
+    const deduplicatedGoals = Array.from(goalMap.values());
+
     if (invalidGoals.length > 0) {
       return {
         error: true,
@@ -1221,9 +1228,9 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       };
     }
 
-    const removedCount = processedGoals.filter(g => g.action === 'remove').length;
-    const updatedCount = processedGoals.length - removedCount;
-    let summary = `Ready to process ${processedGoals.length} goal updates.`;
+    const removedCount = deduplicatedGoals.filter(g => g.action === 'remove').length;
+    const updatedCount = deduplicatedGoals.length - removedCount;
+    let summary = `Ready to process ${deduplicatedGoals.length} goal updates.`;
     if (removedCount > 0 && updatedCount > 0) summary = `I'll update ${updatedCount} goals and remove ${removedCount} others.`;
     else if (removedCount > 0) summary = `I'll remove ${removedCount} of your tracking goals.`;
     else summary = `I'll update targets for ${updatedCount} of your goals.`;
@@ -1233,7 +1240,7 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
       proposal_id: proposalId,
       pending: true,
       data: {
-        goals: processedGoals
+        goals: deduplicatedGoals
       },
       message: summary
     };
