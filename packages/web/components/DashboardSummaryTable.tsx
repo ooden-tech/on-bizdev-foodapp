@@ -73,7 +73,7 @@ const DashboardSummaryTable: React.FC<DashboardSummaryTableProps> = ({
                     <p>No goals set or data logged for today yet.</p>
                 </div>
             ) : (
-                <div className="bg-white border border-gray-300 rounded-lg overflow-hidden shadow-md mt-0 mb-0 flex justify-center items-center w-full max-w-4xl">
+                <div className="bg-white border border-gray-300 rounded-lg overflow-hidden shadow-md mt-0 mb-0 flex justify-center items-center w-full">
                     <div className="overflow-x-auto w-full">
                         <table className="min-w-full table-auto divide-y divide-gray-200">
                             <thead className="bg-gray-100">

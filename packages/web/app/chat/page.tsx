@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { TypingIndicator } from '@/components/LoadingIndicators';
 import FoodLogDetailModal from '@/components/FoodLogDetailModal';
@@ -11,6 +11,7 @@ import DashboardShell from '@/components/DashboardShell';
 import DashboardSummaryTable from '@/components/DashboardSummaryTable';
 import ChatMessageList from '@/components/ChatMessageList';
 import { normalizeNutrientKey, MASTER_NUTRIENT_MAP, getStartAndEndOfDay } from 'shared';
+import { useChatSessions } from '@/hooks/useChatSessions';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,24 +43,15 @@ interface DailyTotals {
   [nutrientKey: string]: number;
 }
 
-interface ChatSessionMeta {
-  id: string;
-  title: string;
-  updated_at: string;
-}
-
 function ChatContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { user, supabase, loading: authLoading, session } = useAuth();
-
-  const activeChatId = searchParams.get('id');
+  const { activeChatId, refreshChatSessions } = useChatSessions();
 
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
-  const [chatSessions, setChatSessions] = useState<ChatSessionMeta[]>([]);
-  const [loadingChats, setLoadingChats] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const skipFetchRef = React.useRef(false);
 
   // --- Dashboard State ---
   const [userGoals, setUserGoals] = useState<UserGoal[]>([]);
@@ -77,6 +69,10 @@ function ChatContent() {
   // Fetch initial messages when activeChatId changes
   useEffect(() => {
     const fetchInitialMessages = async () => {
+      if (skipFetchRef.current) {
+        skipFetchRef.current = false;
+        return;
+      }
       if (!activeChatId || !supabase) {
         setChatHistory([]);
         return;
@@ -109,31 +105,6 @@ function ChatContent() {
 
     fetchInitialMessages();
   }, [activeChatId, supabase]);
-
-  // --- Fetch chat sessions on load ---
-  const fetchChatSessions = useCallback(async () => {
-    if (!user || !supabase) return;
-    setLoadingChats(true);
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .select('id, title, updated_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setChatSessions(data);
-      if (data.length > 0 && !activeChatId) {
-        router.push(`/chat?id=${data[0].id}`);
-      }
-    }
-    setLoadingChats(false);
-  }, [user, supabase, activeChatId, router]);
-
-  useEffect(() => {
-    if (user && supabase) {
-      fetchChatSessions();
-    }
-  }, [user, supabase, fetchChatSessions]);
 
   // --- Fetch dashboard data ---
   const fetchDashboardData = useCallback(async (forceRefresh = false) => {
@@ -219,52 +190,10 @@ function ChatContent() {
     message_type: responseData.response_type,
   });
 
-  const handleNewChat = async () => {
-    if (!user || !supabase) return;
-    const now = new Date();
-    const title = `Chat ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .insert([{ user_id: user.id, title }])
-      .select('id')
-      .single();
-    if (!error && data) {
-      router.push(`/chat?id=${data.id}`);
-      setChatHistory([]);
-      setMessage('');
-      fetchChatSessions();
-    }
-  };
-
-  const handleSelectChat = (chatId: string) => {
-    router.push(`/chat?id=${chatId}`);
-    setMessage('');
-  };
-
-  const handleDeleteChat = async (chatId: string) => {
-    if (!supabase) return;
-    try {
-      const { error } = await supabase
-        .from('chat_sessions')
-        .delete()
-        .eq('id', chatId);
-
-      if (error) throw error;
-
-      if (activeChatId === chatId) {
-        router.push('/chat');
-      }
-      fetchChatSessions();
-    } catch (err) {
-      console.error('Error deleting chat:', err);
-      alert('Failed to delete chat');
-    }
-  };
-
   const handleSend = async (e?: React.FormEvent<HTMLFormElement>, actionPayload?: string, isHidden = false) => {
     if (e) e.preventDefault();
     const textToSend = actionPayload || message.trim();
-    if (!textToSend || sending || authLoading || !activeChatId || !supabase) return;
+    if (!textToSend || sending || authLoading || !supabase || !user) return;
 
     setSending(true);
     setCurrentStep('Communicating with NutriPal...');
@@ -275,8 +204,32 @@ function ChatContent() {
     }
     setMessage('');
 
+    // Auto-create a chat session if none is active
+    let sessionId = activeChatId;
+    if (!sessionId) {
+      try {
+        const now = new Date();
+        const title = `Chat ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+        const { data, error: createError } = await supabase
+          .from('chat_sessions')
+          .insert([{ user_id: user.id, title }])
+          .select('id')
+          .single();
+        if (createError || !data) throw createError || new Error('Failed to create chat');
+        sessionId = data.id;
+        skipFetchRef.current = true;
+        router.push(`/chat?id=${sessionId}`);
+        refreshChatSessions();
+      } catch (err) {
+        console.error('Error auto-creating chat session:', err);
+        setChatHistory(prev => [...prev, { id: Date.now() + 1, sender: 'error', text: 'Failed to create chat session.' }]);
+        setSending(false);
+        setCurrentStep(null);
+        return;
+      }
+    }
+
     try {
-      // Use standard fetch for streaming
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/chat-handler`, {
         method: 'POST',
         headers: {
@@ -286,7 +239,7 @@ function ChatContent() {
         },
         body: JSON.stringify({
           message: textToSend,
-          session_id: activeChatId,
+          session_id: sessionId,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
         })
       });
@@ -305,7 +258,6 @@ function ChatContent() {
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
 
-        // Process all complete lines except the last one which might be partial
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -316,7 +268,6 @@ function ChatContent() {
               if (json.step) {
                 setCurrentStep(json.step);
               } else if (json.status) {
-                // Final result
                 const botMessage = processBotReply(json);
                 setChatHistory(prev => [...prev, botMessage]);
                 setCurrentStep(null);
@@ -441,11 +392,11 @@ function ChatContent() {
             onChange={(e) => setMessage(e.target.value)}
             placeholder={sending ? "Waiting for response..." : "Type your message..."}
             className="flex-1 px-4 py-2 border border-gray-300 rounded-full text-black placeholder-black focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-            disabled={sending || !activeChatId}
+            disabled={sending}
           />
           <button
             type="submit"
-            disabled={sending || !message.trim() || !activeChatId}
+            disabled={sending || !message.trim()}
             className="px-5 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200"
           >
             Send
@@ -469,14 +420,7 @@ function ChatContent() {
   );
 
   return (
-    <DashboardShell
-      headerTitle="Chat & Dashboard"
-      chatSessions={chatSessions.map(s => ({ chat_id: s.id, title: s.title, updated_at: s.updated_at }))}
-      activeChatId={activeChatId || undefined}
-      onSelectChat={handleSelectChat}
-      onDeleteChat={handleDeleteChat}
-      onNewChat={handleNewChat}
-    >
+    <DashboardShell headerTitle="Chat & Dashboard">
       <ChatDashboardLayout
         chatPanel={chatPanelContent}
         dashboardPanel={dashboardPanelContent}

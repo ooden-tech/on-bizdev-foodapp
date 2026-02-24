@@ -3,16 +3,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
-// import { useUnitFormatter } from '@/utils/formatting'; // REMOVED
-import { formatWeight, formatVolume, formatMilligram, formatMicrogram, formatEnergy } from '@/utils/formatting'; // Import needed formatters
-// Import spinner if needed, e.g., from loading indicators component
-// import { LoadingSpinner } from '@/components/LoadingIndicators';
+import { formatWeight, formatVolume, formatMilligram, formatMicrogram, formatEnergy } from '@/utils/formatting';
+import DashboardShell from '@/components/DashboardShell';
 
-// Define Loading Spinner locally (based on user example)
+// Define Loading Spinner locally
 const LoadingSpinner = () => {
   return (
     <div className="flex justify-center items-center py-2">
-      <div className="relative w-6 h-6"> {/* Smaller spinner for modal */}
+      <div className="relative w-6 h-6">
         <div className="absolute top-0 left-0 right-0 bottom-0 border-2 border-blue-100 rounded-full"></div>
         <div className="absolute top-0 left-0 right-0 bottom-0 border-2 border-transparent border-t-blue-600 rounded-full animate-spin"></div>
       </div>
@@ -27,56 +25,46 @@ interface Ingredient {
   nutrition_data?: Record<string, number>;
 }
 
-// Interface for saved recipes (can expand later)
 interface SavedRecipe {
   id: string;
   recipe_name: string;
   calories?: number | null;
   description?: string | null;
-  ingredients?: string | null; // Keep for legacy, though we'll use recipe_ingredients
+  ingredients?: string | null;
   recipe_ingredients?: Ingredient[];
   per_serving_nutrition?: Record<string, number | null>;
   nutrition_data?: Record<string, number | null>;
   servings?: number;
   instructions?: string | null;
-  // Add other potential detailed fields: protein, carbs, fat etc.
-  [key: string]: unknown; // Fix: Use unknown instead of any
+  [key: string]: unknown;
 }
 
-// Interface for User Goals
 interface UserGoal {
   nutrient: string;
   target_value: number;
   unit: string;
 }
 
-// == Saved Recipes Page Component ==
 export default function SavedRecipesPage() {
   const { user, supabase } = useAuth();
-  // Removed hook call
-  // const { formatWeight, formatVolume } = useUnitFormatter();
   const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
-  const [loading, setLoading] = useState<boolean>(true); // Initial page load
-  const [refreshing, setRefreshing] = useState<boolean>(false); // Pull-to-refresh style loading
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false); // For mobile menu
 
-  // Action/Modal States
   const [loggingRecipeId, setLoggingRecipeId] = useState<string | null>(null);
   const [deletingRecipeId, setDeletingRecipeId] = useState<string | null>(null);
   const [isRecipeModalVisible, setIsRecipeModalVisible] = useState(false);
-  const [isAddRecipeModalVisible, setIsAddRecipeModalVisible] = useState(false); // New state
+  const [isAddRecipeModalVisible, setIsAddRecipeModalVisible] = useState(false);
   const [selectedRecipeData, setSelectedRecipeData] = useState<SavedRecipe | null>(null);
   const [isModalLoading, setIsModalLoading] = useState(false);
-  const [isSavingRecipe, setIsSavingRecipe] = useState(false); // New state
+  const [isSavingRecipe, setIsSavingRecipe] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
-  const [userGoals, setUserGoals] = useState<UserGoal[]>([]); // Store user goals
+  const [userGoals, setUserGoals] = useState<UserGoal[]>([]);
 
-  // Portion size modal state
   const [portionModalRecipe, setPortionModalRecipe] = useState<SavedRecipe | null>(null);
   const [portionSize, setPortionSize] = useState('1 serving');
 
-  // Form state for new recipe
   const [newRecipe, setNewRecipe] = useState({
     name: '',
     description: '',
@@ -84,13 +72,11 @@ export default function SavedRecipesPage() {
     ingredients: ''
   });
 
-  // Edit states for modal
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editInstructions, setEditInstructions] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
-  // Fetch recipes AND user goals
   const loadData = useCallback(async (isRefreshing = false) => {
     if (!user || !supabase) {
       setLoading(false);
@@ -98,17 +84,16 @@ export default function SavedRecipesPage() {
       return;
     }
 
-    if (!isRefreshing) setLoading(true); // Only show full page load spinner initially
-    else setRefreshing(true); // Show refresh spinner
+    if (!isRefreshing) setLoading(true);
+    else setRefreshing(true);
     setError(null);
-    setModalError(null); // Clear modal error on refresh
+    setModalError(null);
 
     try {
-      // Fetch recipes and goals concurrently
       const [recipeResponse, goalsResponse] = await Promise.all([
         supabase
           .from('user_recipes')
-          .select('*, recipe_ingredients(*)') // Fetch all columns and ingredients
+          .select('*, recipe_ingredients(*)')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false }),
         supabase
@@ -117,14 +102,12 @@ export default function SavedRecipesPage() {
           .eq('user_id', user.id)
       ]);
 
-      // Handle recipe response
       if (recipeResponse.error) throw recipeResponse.error;
       setRecipes(recipeResponse.data || []);
 
-      // Handle goals response
       if (goalsResponse.error) {
         console.warn("Could not load user goals:", goalsResponse.error.message);
-        setUserGoals([]); // Set empty if error
+        setUserGoals([]);
       } else {
         setUserGoals(goalsResponse.data || []);
       }
@@ -133,43 +116,36 @@ export default function SavedRecipesPage() {
       console.error("Error loading data:", err);
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(errorMessage || "Failed to load data.");
-      setRecipes([]); // Clear recipes on error
-      setUserGoals([]); // Clear goals on error
+      setRecipes([]);
+      setUserGoals([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [user, supabase]);
 
-  // Initial data load
   useEffect(() => {
     loadData();
-  }, [loadData]); // Now depends on the memoized loadData function
-
-  // == Action Handlers (Placeholders/Simulated for now) ==
+  }, [loadData]);
 
   const handleRefresh = () => {
-    if (loggingRecipeId || deletingRecipeId) return; // Don't refresh during other actions
-    loadData(true); // Pass true to indicate refresh
+    if (loggingRecipeId || deletingRecipeId) return;
+    loadData(true);
   };
 
   const handleRecipeItemPress = (recipe: SavedRecipe) => {
     if (deletingRecipeId || loggingRecipeId) return;
     console.log("Opening modal for:", recipe.recipe_name);
-    // Data is already fully loaded via loadData
     setSelectedRecipeData({ ...recipe });
     setIsRecipeModalVisible(true);
     setModalError(null);
-    // No separate modal loading needed as data is pre-fetched, but restore setter call if used elsewhere
-    // setIsModalLoading(true); // Restore if needed
-    // setTimeout(() => { ... }, 500);
   };
 
   const handleCloseModal = () => {
     setIsRecipeModalVisible(false);
     setSelectedRecipeData(null);
     setModalError(null);
-    setIsEditing(false); // Reset editing state
+    setIsEditing(false);
   };
 
   const handleStartEditing = () => {
@@ -201,7 +177,6 @@ export default function SavedRecipesPage() {
 
       if (updateError) throw updateError;
 
-      // Update local state
       const updatedRecipe = {
         ...selectedRecipeData,
         recipe_name: editName.trim(),
@@ -218,7 +193,6 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // Show portion modal instead of directly logging
   const handleLogRecipe = (recipeId: string, recipeName: string) => {
     if (loggingRecipeId || deletingRecipeId) return;
     const recipe = recipes.find(r => r.id === recipeId);
@@ -229,7 +203,6 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // Actually log the recipe with the specified portion
   const handleConfirmLogRecipe = async () => {
     if (!portionModalRecipe || !supabase || !user) {
       alert("Authentication error. Cannot log recipe.");
@@ -268,13 +241,12 @@ export default function SavedRecipesPage() {
   const handleDeleteRecipe = async (recipeId: string, recipeName: string) => {
     if (deletingRecipeId || loggingRecipeId) return;
 
-    // Confirmation dialog
     if (!window.confirm(`Are you sure you want to delete the recipe "${recipeName}"? This cannot be undone.`)) {
       return;
     }
     console.log(`Attempting to delete recipe: ${recipeName} (${recipeId})`);
     setDeletingRecipeId(recipeId);
-    setModalError(null); // Clear previous modal errors
+    setModalError(null);
 
     if (!supabase || !user) {
       setModalError("Authentication error. Cannot delete recipe.");
@@ -283,27 +255,23 @@ export default function SavedRecipesPage() {
     }
 
     try {
-      // --- Actual Deletion Logic ---
       const { error } = await supabase
         .from('user_recipes')
         .delete()
-        .match({ id: recipeId, user_id: user.id }); // Match both ID and user_id for security
+        .match({ id: recipeId, user_id: user.id });
 
       if (error) {
-        throw error; // Throw error to be caught below
+        throw error;
       }
-      // --- End Deletion Logic ---
 
       console.log("Recipe deleted successfully from DB.");
-      // Remove recipe from local state
       setRecipes(prev => prev.filter(recipe => recipe.id !== recipeId));
-      handleCloseModal(); // Close modal after successful deletion
-      alert(`Recipe "${recipeName}" deleted.`); // Success feedback
+      handleCloseModal();
+      alert(`Recipe "${recipeName}" deleted.`);
     } catch (err: unknown) {
       console.error("Failed to delete recipe:", err);
       const errorMessage = err instanceof Error ? err.message : String(err);
       setModalError(`Failed to delete recipe: ${errorMessage}`);
-      // Don't close modal on error, let user see the message
     } finally {
       setDeletingRecipeId(null);
     }
@@ -319,7 +287,6 @@ export default function SavedRecipesPage() {
     setModalError(null);
 
     try {
-      // Use chat-handler to save recipe via natural language parsing
       const { data: response, error: funcError } = await supabase.functions.invoke('chat-handler', {
         body: {
           message: `Save my recipe: ${newRecipe.name}. Servings: ${newRecipe.servings}. Ingredients: ${newRecipe.ingredients}`
@@ -344,11 +311,9 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // == Render Function for Modal (Implement Details) ==
   const renderRecipeModal = () => {
     if (!isRecipeModalVisible || !selectedRecipeData) return null;
 
-    // --- Define formatting logic using imported functions --- 
     const formatValue = (value: number | null | undefined, unit: string): string => {
       if (value === null || value === undefined || isNaN(value)) return '-';
       switch (unit?.toLowerCase()) {
@@ -361,9 +326,7 @@ export default function SavedRecipesPage() {
         default: return `${value.toFixed(0)} ${unit || ''}`;
       }
     };
-    // --- End formatting logic ---
 
-    // Standardized Nutrient List (Matching FoodLogDetailModal)
     const NUTRIENT_MAP: Record<string, { name: string; unit: string }> = {
       protein_g: { name: "Protein", unit: "g" },
       fat_total_g: { name: "Total Fat", unit: "g" },
@@ -557,7 +520,6 @@ export default function SavedRecipesPage() {
               </div>
             )}
 
-            {/* If no instructions and not editing, show an option to add them if user wants */}
             {!isEditing && !selectedRecipeData.instructions && (
               <div className="mt-8 pt-6 border-t border-gray-50 text-center">
                 <button
@@ -625,144 +587,96 @@ export default function SavedRecipesPage() {
     );
   };
 
-  // Log the recipes state just before rendering
-  // console.log("Current recipes state:", recipes); // REMOVED Debug log
+  const addRecipeButton = (
+    <button
+      onClick={() => setIsAddRecipeModalVisible(true)}
+      className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+      title="Add New Recipe"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+      </svg>
+    </button>
+  );
 
-  // == Render Component ==
   return (
-    <div className="flex h-screen bg-gray-50 relative overflow-hidden"> {/* Changed background */}
-      {/* Sidebar navigation (Keep hamburger logic) */}
-      <div className={`sidebar fixed top-0 left-0 h-full w-64 bg-white shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        {/* ... (Sidebar content remains the same - Ensure links are correct) ... */}
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-          <h2 className="text-xl font-semibold text-gray-800">NutriPal</h2>
-          <button onClick={() => setMenuOpen(false)} className="p-2 rounded-md text-gray-600 hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+    <DashboardShell headerTitle="Saved Recipes" headerRight={addRecipeButton}>
+      {/* Error message */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md border border-red-300">
+          {error}
         </div>
-        <nav className="flex-1 p-4 space-y-1">
-          <Link href="/dashboard" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Dashboard</Link>
-          <Link href="/profile" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Profile</Link>
-          <Link href="/analytics" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Analytics</Link>
-          <Link href="/recipes" className="block px-3 py-2 bg-blue-50 text-blue-700 rounded-md font-medium">Saved Recipes</Link>
-          <Link href="/chat" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Chat</Link>
-          <Link href="/settings" className="block px-3 py-2 text-gray-600 rounded-md hover:bg-gray-100">Settings</Link>
-        </nav>
-      </div>
+      )}
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header with hamburger */}
-        <header className="bg-white border-b border-gray-200 p-4 z-10 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <button className="menu-button p-2 rounded-md text-gray-600 hover:bg-gray-100" onClick={() => setMenuOpen(true)}>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-            </button>
-            <h2 className="text-xl font-semibold text-gray-800">Saved Recipes</h2>
-            <button
-              onClick={() => setIsAddRecipeModalVisible(true)}
-              className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              title="Add New Recipe"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-          </div>
-        </header>
-
-        {/* Main content scrolling area */}
-        <main className="flex-1 overflow-y-auto">
-          {/* REMOVED Page Header Section */}
-          {/* 
-         <div className="px-6 py-4 border-b border-gray-200 bg-white"> 
-           <h1 className="text-2xl font-bold text-blue-600">Your Saved Recipes</h1>
-           <p className="text-gray-600 mt-1">Quickly log your frequent meals or view details.</p>
-         </div>
-         */}
-
-          {/* Error message */}
-          {error && (
-            <div className="m-4 p-3 bg-red-100 text-red-700 rounded-md border border-red-300">
-              {error}
+      {/* Loading State */}
+      {loading && !refreshing ? (
+        <div className="text-center py-20">
+          <p className="text-gray-500">Loading recipes...</p>
+        </div>
+      ) : (
+        <div>
+          {/* Refreshing indicator */}
+          {refreshing && (
+            <div className="flex justify-center py-2 mb-4">
+              <p>Refreshing...</p>
             </div>
           )}
 
-          {/* Loading State */}
-          {loading && !refreshing ? (
-            <div className="text-center py-20">
-              <p className="text-gray-500">Loading recipes...</p>
-              {/* <LoadingSpinner /> */}
+          {/* Recipe list container */}
+          {recipes.length > 0 ? (
+            <div className="max-w-3xl mx-auto space-y-3">
+              {recipes.map(recipe => (
+                <div
+                  key={recipe.id}
+                  onClick={() => handleRecipeItemPress(recipe)}
+                  className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow duration-150 ease-in-out"
+                >
+                  <div className="px-5 py-4 flex justify-between items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-lg text-gray-900 truncate">{recipe.recipe_name}</h3>
+                    </div>
+                    <div className="flex items-center flex-shrink-0 ml-4">
+                      {recipe.calories !== null && recipe.calories !== undefined && (
+                        <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mr-3">
+                          {Math.round(recipe.calories)} kcal
+                        </span>
+                      )}
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : recipes.length === 0 ? (
+            <div className="text-center py-10 px-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+              <p className="text-gray-600 mb-4">You haven&apos;t saved any recipes yet.</p>
+              <Link href="/chat" className="text-blue-600 hover:underline">Start chatting to find and save recipes!</Link>
             </div>
           ) : (
-            <div className="p-4 md:p-6"> {/* Add padding around list */}
-              {/* Refreshing indicator */}
-              {refreshing && (
-                <div className="flex justify-center py-2 mb-4">
-                  {/* <LoadingSpinner /> */}
-                  <p>Refreshing...</p>
-                </div>
-              )}
-
-              {/* Recipe list container */}
-              {recipes.length > 0 ? (
-                <div className="max-w-3xl mx-auto space-y-3">
-                  {recipes.map(recipe => (
-                    <div
-                      key={recipe.id}
-                      onClick={() => handleRecipeItemPress(recipe)}
-                      className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow duration-150 ease-in-out"
-                    >
-                      <div className="px-5 py-4 flex justify-between items-center gap-4">
-                        <div className="flex-1 min-w-0">
-                          {/* Restore truncate and remove debug span */}
-                          <h3 className="font-medium text-lg text-gray-900 truncate">{recipe.recipe_name}</h3>
-                          {/* Optional: show description snippet */}
-                          {/* {recipe.description && <p className="text-sm text-gray-500 mt-1 truncate">{recipe.description}</p>} */}
-                        </div>
-                        <div className="flex items-center flex-shrink-0 ml-4">
-                          {/* Optional: Calories badge */}
-                          {recipe.calories !== null && recipe.calories !== undefined && (
-                            <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mr-3">
-                              {Math.round(recipe.calories)} kcal
-                            </span>
-                          )}
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : recipes.length === 0 ? (
-                <div className="text-center py-10 px-4 bg-white rounded-lg border border-gray-200 shadow-sm">
-                  <p className="text-gray-600 mb-4">You haven&apos;t saved any recipes yet.</p>
-                  <Link href="/chat" className="text-blue-600 hover:underline">Start chatting to find and save recipes!</Link>
-                </div>
-              ) : (
-                <div className="text-center py-10">
-                  <p className="text-lg text-gray-500">You haven't saved any recipes yet.</p>
-                  <p className="mt-2 text-gray-500">Recipes you save from the Chat will appear here.</p>
-                </div>
-              )}
-
-              {/* Refresh Button */}
-              {!loading && (
-                <div className="flex justify-center mt-6 mb-4">
-                  <button
-                    onClick={handleRefresh}
-                    disabled={refreshing || loading || !!loggingRecipeId || !!deletingRecipeId}
-                    className={`px-4 py-2 border border-gray-300 rounded-md text-sm font-medium ${refreshing || loading || loggingRecipeId || deletingRecipeId ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'text-gray-700 bg-white hover:bg-gray-50'}`}
-                  >
-                    {refreshing ? 'Refreshing...' : 'Refresh Recipes'}
-                  </button>
-                </div>
-              )}
+            <div className="text-center py-10">
+              <p className="text-lg text-gray-500">You haven't saved any recipes yet.</p>
+              <p className="mt-2 text-gray-500">Recipes you save from the Chat will appear here.</p>
             </div>
           )}
-        </main>
-      </div>
 
-      {/* Render the modal */}
+          {/* Refresh Button */}
+          {!loading && (
+            <div className="flex justify-center mt-6 mb-4">
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing || loading || !!loggingRecipeId || !!deletingRecipeId}
+                className={`px-4 py-2 border border-gray-300 rounded-md text-sm font-medium ${refreshing || loading || loggingRecipeId || deletingRecipeId ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'text-gray-700 bg-white hover:bg-gray-50'}`}
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh Recipes'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Render the recipe detail modal */}
       {renderRecipeModal()}
 
       {/* Add Recipe Modal */}
@@ -807,7 +721,7 @@ export default function SavedRecipesPage() {
                   onChange={(e) => setNewRecipe({ ...newRecipe, ingredients: e.target.value })}
                   rows={6}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-black"
-                  placeholder="e.g. 500g Chicken breast&#10;2 large carrots&#10;1 onion"
+                  placeholder={"e.g. 500g Chicken breast\n2 large carrots\n1 onion"}
                 />
               </div>
               {modalError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{modalError}</p>}
@@ -883,6 +797,6 @@ export default function SavedRecipesPage() {
           </div>
         </div>
       )}
-    </div>
+    </DashboardShell>
   );
 }

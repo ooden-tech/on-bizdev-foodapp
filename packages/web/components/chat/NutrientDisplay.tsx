@@ -27,7 +27,7 @@ export const NutrientDisplay: React.FC<NutrientDisplayProps> = ({
     const coreKeys = ['protein_g', 'carbs_g', 'fat_total_g'];
     const trackedKeys = userGoals
         .map(g => g.nutrient)
-        .filter(k => k !== 'calories' && MASTER_NUTRIENT_MAP[k]);
+        .filter(k => k !== 'calories' && !coreKeys.includes(k) && MASTER_NUTRIENT_MAP[k]);
 
     return (
         <div className="space-y-2">

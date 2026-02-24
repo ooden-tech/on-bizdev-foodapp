@@ -175,26 +175,54 @@ export class InsightAgent {
 
   private async executeSummary(context: any, filters: any) {
     const userId = context.userId;
-    const days = filters.days || 1;
-    const { logs } = await context.db.getHistoricalData(userId, { days });
+    const timezone = context.timezone || 'UTC';
+    const days = filters.days || 7;
+
+    // Use getAnalyticalData for structured daily totals (same approach as patterns/reflect)
+    const analysisData = await context.db.getAnalyticalData(userId, days, timezone);
+    const goals = await context.db.getUserGoals(userId);
+
+    const daysWithData = Object.keys(analysisData.dailyTotals).length;
+    console.log(`[InsightAgent] executeSummary: ${daysWithData} days with data out of ${days} requested`);
 
     const summaryPrompt = `
-    Provide a compressed summary. 
-    Hard Rules: Bullets only, 3-5 max, one idea per bullet. No moral tone.
-    Answer: What mattered, what didn't, one takeaway, one adjustment.
+    You are a Nutrition Summary Analyst. Provide a comprehensive yet concise progress summary.
     
-    Logs: ${JSON.stringify(logs.slice(-10))} 
+    Period: Last ${days} days (${daysWithData} days have logged data)
+    Daily Totals by Date: ${JSON.stringify(analysisData.dailyTotals)}
+    User Goals: ${JSON.stringify(goals || 'No goals set')}
+    Day Classifications: ${JSON.stringify(analysisData.classifications)}
+    
+    Task:
+    1. Per-day highlights: For each day with data, mention key foods logged and total calories vs goal.
+    2. Best & worst days: Identify the best and worst days based on goal adherence.
+    3. Averages vs goals: Show average daily intake vs target for each tracked nutrient.
+    4. Key patterns: Note any recurring themes (e.g., consistently low protein, high sugar on weekends).
+    5. One actionable adjustment for the coming week.
+    
+    Hard Rules:
+    - Be SPECIFIC with numbers (actual calories, grams, etc.). Reference actual foods the user logged.
+    - If data is missing for some days, note that (e.g., "3 of 7 days had no logged meals").
+    - No moral tone. Factual and constructive.
+    - Use structured sections, not generic one-liners.
     `;
 
     const openai = createOpenAIClient();
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
-      messages: [{ role: "system", content: summaryPrompt }],
+      messages: [
+        { role: "system", content: summaryPrompt },
+      ],
     });
 
     return {
       action: 'summary',
-      summary: response.choices[0].message.content
+      summary: response.choices[0].message.content,
+      data_snapshot: {
+        days_requested: days,
+        days_with_data: daysWithData,
+        goals_count: goals?.length || 0
+      }
     };
   }
 }
