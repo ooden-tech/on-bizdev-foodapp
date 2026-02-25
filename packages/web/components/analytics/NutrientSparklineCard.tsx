@@ -2,6 +2,7 @@ import React from 'react';
 import { BarChart, Bar, ResponsiveContainer, YAxis, ReferenceLine } from 'recharts';
 import { NutrientAnalyticsData } from '@/utils/analytics-helpers';
 import { formatNutrientName, formatNutrientValue } from '@/utils/formatting';
+import { useProfile } from '@/context/ProfileContext';
 
 interface NutrientSparklineCardProps {
     data: NutrientAnalyticsData;
@@ -11,6 +12,7 @@ interface NutrientSparklineCardProps {
 
 export default function NutrientSparklineCard({ data, onClick, isSelected }: NutrientSparklineCardProps) {
     const { nutrient, goal, dailyTotals, weeklyAvg, streak } = data;
+    const { displayUnits } = useProfile();
     const isLimit = goal.goal_type === 'limit';
 
     // For the 7-day sparkline
@@ -87,10 +89,10 @@ export default function NutrientSparklineCard({ data, onClick, isSelected }: Nut
             <div className="mt-3">
                 <div className="flex items-baseline gap-1">
                     <span className="text-xl font-extrabold text-gray-900">
-                        {formatNutrientValue(nutrient, weeklyAvg.value)}
+                        {formatNutrientValue(nutrient, weeklyAvg.value, displayUnits)}
                     </span>
                     <span className="text-sm text-gray-500">
-                        / {formatNutrientValue(nutrient, goal.target_value)} {goal.unit}
+                        / {formatNutrientValue(nutrient, goal.target_value, displayUnits)}
                     </span>
                 </div>
 

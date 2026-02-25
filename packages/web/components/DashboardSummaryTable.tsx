@@ -2,6 +2,7 @@ import React from 'react';
 import { formatNutrientName, formatNutrientValue } from '@/utils/formatting';
 import { MASTER_NUTRIENT_MAP } from 'shared';
 import { Progress } from "@/components/ui/progress";
+import { useProfile } from '@/context/ProfileContext';
 
 interface UserGoal {
     nutrient: string;
@@ -40,6 +41,8 @@ const DashboardSummaryTable: React.FC<DashboardSummaryTableProps> = ({
     // --- DEBUG LOG --- 
     console.log("[DashboardSummaryTable] Received userGoals prop:", JSON.stringify(userGoals));
     // --- END DEBUG LOG ---
+
+    const { displayUnits } = useProfile();
 
     return (
         <div className="relative flex flex-col h-full justify-center items-center">
@@ -103,6 +106,7 @@ const DashboardSummaryTable: React.FC<DashboardSummaryTableProps> = ({
                                                 green_min: caloriesGoal?.green_min,
                                                 red_min: caloriesGoal?.red_min
                                             }}
+                                            displayUnits={displayUnits}
                                         />
                                     );
                                 })()}
@@ -119,6 +123,7 @@ const DashboardSummaryTable: React.FC<DashboardSummaryTableProps> = ({
                                             green_min: goal.green_min,
                                             red_min: goal.red_min
                                         }}
+                                        displayUnits={displayUnits}
                                     />
                                 ))}
                             </tbody>
@@ -141,20 +146,21 @@ interface SummaryTableRowProps {
         green_min?: number;
         red_min?: number;
     };
+    displayUnits: any;
 }
 
-const SummaryTableRow: React.FC<SummaryTableRowProps> = ({ nutrient, current, target, adjustment = 0, goalType, thresholds = {} }) => {
+const SummaryTableRow: React.FC<SummaryTableRowProps> = ({ nutrient, current, target, adjustment = 0, goalType, thresholds = {}, displayUnits }) => {
     const nutrientInfo = MASTER_NUTRIENT_MAP[nutrient.toLowerCase()];
     const unit = nutrientInfo?.unit || (nutrient === 'calories' ? 'kcal' : '');
     const isLimit = goalType === 'limit';
     const finalTarget = target !== undefined ? target + adjustment : undefined;
 
-    const displayCurrent = formatNutrientValue(nutrient, current);
-    const displayBaseTarget = target !== undefined ? formatNutrientValue(nutrient, target) : '-';
-    const displayAdjustment = adjustment !== 0 ? ` (+${formatNutrientValue(nutrient, adjustment)})` : '';
+    const displayCurrent = formatNutrientValue(nutrient, current, displayUnits);
+    const displayBaseTarget = target !== undefined ? formatNutrientValue(nutrient, target, displayUnits) : '-';
+    const displayAdjustment = adjustment !== 0 ? ` (+${formatNutrientValue(nutrient, adjustment, displayUnits)})` : '';
     const displayTarget = target !== undefined ? (
         <div className="flex flex-col">
-            <span>{formatNutrientValue(nutrient, finalTarget!)}</span>
+            <span>{formatNutrientValue(nutrient, finalTarget!, displayUnits)}</span>
             {adjustment !== 0 && (
                 <span className="text-[10px] text-blue-500 font-medium">Base: {displayBaseTarget} + Workout</span>
             )}
@@ -167,7 +173,7 @@ const SummaryTableRow: React.FC<SummaryTableRowProps> = ({ nutrient, current, ta
 
     // Delta: Target - Consumed. If consumed > target, delta is negative (e.g. 2000 - 2100 = -100)
     const delta = finalTarget !== undefined ? finalTarget - current : null;
-    const displayDelta = delta !== null ? formatNutrientValue(nutrient, Math.abs(delta)) : '-';
+    const displayDelta = delta !== null ? formatNutrientValue(nutrient, Math.abs(delta), displayUnits) : '-';
 
     // For limits, being "over" (negative delta) is bad (red). For goals, it's usually good (emerald).
     const deltaColor = delta !== null

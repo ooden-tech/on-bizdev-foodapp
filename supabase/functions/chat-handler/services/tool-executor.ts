@@ -379,7 +379,14 @@ export class ToolExecutor {
 
     return {
       consumed: totals,
-      adjustments: adjustmentMap
+      adjustments: adjustmentMap,
+      logs: logs ? logs.map((l: any) => ({
+        id: l.id,
+        food_name: l.food_name,
+        calories: l.calories,
+        portion: l.portion,
+        log_time: l.log_time
+      })) : []
     };
   }
 

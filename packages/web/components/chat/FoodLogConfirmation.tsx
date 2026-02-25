@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { NutrientDisplay, UserGoal } from './NutrientDisplay';
 import { formatNutrientName, formatNutrientValue } from '../../utils/formatting';
+import { useProfile } from '@/context/ProfileContext';
 
 interface FoodItem {
     food_name: string;
@@ -53,6 +54,7 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
     const [showDetails, setShowDetails] = useState(false);
     // 'totals' = aggregated view, 0..N = individual item index
     const [activeTab, setActiveTab] = useState<'totals' | number>('totals');
+    const { displayUnits } = useProfile();
     const isMultiItem = nutrition.length > 1;
 
     const totalCalories = nutrition.reduce((sum, item) => sum + (item.calories || 0), 0);
@@ -86,7 +88,7 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
             return {
                 key: goal.nutrient,
                 name: formatNutrientName(goal.nutrient),
-                valueStr: formatNutrientValue(goal.nutrient, val),
+                valueStr: formatNutrientValue(goal.nutrient, val, displayUnits),
                 unit: '', // unit is now included in valueStr
                 confidence: displayItem?.confidence_details?.[goal.nutrient] || displayItem?.confidence || 'high'
             };
@@ -165,8 +167,8 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                         <button
                             onClick={() => setActiveTab('totals')}
                             className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${activeTab === 'totals'
-                                    ? 'bg-blue-600 text-white shadow-sm'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? 'bg-blue-600 text-white shadow-sm'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             Totals
@@ -176,8 +178,8 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                                 key={idx}
                                 onClick={() => setActiveTab(idx)}
                                 className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${activeTab === idx
-                                        ? 'bg-blue-600 text-white shadow-sm'
-                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                     }`}
                             >
                                 {item.food_name}

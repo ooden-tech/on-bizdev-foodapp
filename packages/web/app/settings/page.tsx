@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import DashboardShell from '@/components/DashboardShell';
-import type { DisplayUnits, VolumeUnit, WeightUnit, EnergyUnit } from '@/utils/formatting';
+import { useProfile } from '@/context/ProfileContext';
+import type { DisplayUnits } from '@/utils/formatting';
 
 // Loading Spinner Component
 const LoadingSpinner = () => {
@@ -41,25 +42,10 @@ const DEFAULT_UNITS: DisplayUnits = { volume: 'ml', weight: 'g', energy: 'kcal' 
 export default function SettingsPage() {
   const { user, supabase, loading, error, signOut } = useAuth();
   const router = useRouter();
+  const { displayUnits, setDisplayUnits } = useProfile();
   const [signingOut, setSigningOut] = useState(false);
-  const [displayUnits, setDisplayUnits] = useState<DisplayUnits>(DEFAULT_UNITS);
   const [unitsSaving, setUnitsSaving] = useState(false);
   const [unitsMessage, setUnitsMessage] = useState<string | null>(null);
-
-  // Load current display_units from user profile
-  useEffect(() => {
-    if (!user || !supabase) return;
-    (async () => {
-      const { data } = await supabase
-        .from('user_profiles')
-        .select('display_units')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (data?.display_units) {
-        setDisplayUnits({ ...DEFAULT_UNITS, ...data.display_units });
-      }
-    })();
-  }, [user, supabase]);
 
   const saveUnits = useCallback(async (newUnits: DisplayUnits) => {
     if (!user || !supabase) return;

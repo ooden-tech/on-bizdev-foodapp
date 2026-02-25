@@ -375,7 +375,7 @@ function decorateWithContext(message: string, pendingAction: any): string {
           userMessage: message,
           intent: 'view_progress',
           data: {
-            reasoning: 'User wants to see their current progress. Present the data clearly as a table or list with goals vs consumed. Do NOT audit or analyze — just show the numbers.',
+            reasoning: 'User wants to see their current progress. Present the data clearly as a table or list with goals vs consumed. IMPORTANT: You MUST also list out the actual items they logged today (found in progress.logs) so they know what they ate. Do NOT audit or analyze — just show the numbers and the items.',
             progress: progressData,
             goals: goalsData
           },
