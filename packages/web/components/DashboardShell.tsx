@@ -53,8 +53,52 @@ function DashboardShellInner({ children, headerTitle = 'Dashboard', headerRight 
           <Link href="/profile" className={`block px-3 py-2 rounded-md ${isActive('/profile')}`}>Profile</Link>
           <Link href="/analytics" className={`block px-3 py-2 rounded-md ${isActive('/analytics')}`}>Analytics</Link>
           <Link href="/recipes" className={`block px-3 py-2 rounded-md ${isActive('/recipes')}`}>Saved Recipes</Link>
-          <Link href="/chat" className={`block px-3 py-2 rounded-md ${isActive('/chat')}`}>Chat</Link>
           <Link href="/settings" className={`block px-3 py-2 rounded-md ${isActive('/settings')}`}>Settings</Link>
+
+          {/* Chats Section — right under Settings for visibility */}
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            <div className="flex items-center justify-between mb-1 px-3">
+              <Link href="/chat" className={`text-sm font-semibold ${pathname === '/chat' ? 'text-blue-700' : 'text-gray-700 hover:text-blue-600'}`}>Chats</Link>
+              <button
+                onClick={handleNewChat}
+                className="px-2 py-0.5 bg-green-600 text-white rounded text-xs hover:bg-green-700"
+                title="Start a new chat"
+              >
+                + New
+              </button>
+            </div>
+            <ul className="space-y-0.5 max-h-48 overflow-y-auto">
+              {chatSessions.length === 0 && (
+                <li className="text-xs text-gray-400 px-3">No chats yet</li>
+              )}
+              {chatSessions.map((chat) => (
+                <li key={chat.chat_id} className="group flex items-center justify-between">
+                  <button
+                    className={`flex-1 text-left px-2 py-1 rounded text-sm ${chat.chat_id === activeChatId ? 'bg-blue-100 text-blue-700 font-semibold' : 'hover:bg-gray-100 text-gray-700'}`}
+                    onClick={() => handleSelectChat(chat.chat_id)}
+                  >
+                    <span className="block truncate">{chat.title}</span>
+                    <span className="block text-xs text-gray-400">{new Date(chat.updated_at).toLocaleString()}</span>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm('Are you sure you want to delete this chat?')) {
+                        handleDeleteChat(chat.chat_id);
+                      }
+                    }}
+                    className="p-1 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Delete chat"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h14" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+
           {user?.email?.includes('admin') && (
             <Link href="/admin" className={`block px-3 py-2 rounded-md ${isActive('/admin')} mt-4 border-t border-gray-200 pt-4`}>
               <span className="flex items-center">
@@ -66,49 +110,6 @@ function DashboardShellInner({ children, headerTitle = 'Dashboard', headerRight 
             </Link>
           )}
         </nav>
-        {/* Chats Section — always rendered with live data */}
-        <div className="border-t border-gray-200 p-4 flex-shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-semibold text-gray-700">Chats</span>
-            <button
-              onClick={handleNewChat}
-              className="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-              title="Start a new chat"
-            >
-              + New
-            </button>
-          </div>
-          <ul className="space-y-1 max-h-48 overflow-y-auto">
-            {chatSessions.length === 0 && (
-              <li className="text-xs text-gray-400">No chats yet</li>
-            )}
-            {chatSessions.map((chat) => (
-              <li key={chat.chat_id} className="group flex items-center justify-between">
-                <button
-                  className={`flex-1 text-left px-2 py-1 rounded text-sm ${chat.chat_id === activeChatId ? 'bg-blue-100 text-blue-700 font-semibold' : 'hover:bg-gray-100 text-gray-700'}`}
-                  onClick={() => handleSelectChat(chat.chat_id)}
-                >
-                  <span className="block truncate">{chat.title}</span>
-                  <span className="block text-xs text-gray-400">{new Date(chat.updated_at).toLocaleString()}</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm('Are you sure you want to delete this chat?')) {
-                      handleDeleteChat(chat.chat_id);
-                    }
-                  }}
-                  className="p-1 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Delete chat"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h14" />
-                  </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
       </div>
 
       {/* Main Content Area */}

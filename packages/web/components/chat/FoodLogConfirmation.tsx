@@ -51,10 +51,19 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
     confirmLabel = 'Log Food'
 }) => {
     const [showDetails, setShowDetails] = useState(false);
+    // 'totals' = aggregated view, 0..N = individual item index
+    const [activeTab, setActiveTab] = useState<'totals' | number>('totals');
+    const isMultiItem = nutrition.length > 1;
 
     const totalCalories = nutrition.reduce((sum, item) => sum + (item.calories || 0), 0);
     const mainItem = nutrition[0];
-    const itemName = nutrition.length > 1 ? `${mainItem?.food_name} + ${nutrition.length - 1} more` : (mainItem?.food_name || 'Food Item');
+    // Combined natural name for multi-item, e.g. "Bread and Water"
+    const itemName = isMultiItem
+        ? nutrition.map(i => i.food_name).join(' and ')
+        : (mainItem?.food_name || 'Food Item');
+
+    // The item whose data to show in the details section
+    const activeItem = typeof activeTab === 'number' ? nutrition[activeTab] : null;
 
     // Calculate totals for tracked nutrients in order
     const aggregated = nutrition.reduce((acc, item) => {
@@ -66,16 +75,20 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
         return acc;
     }, {} as any);
 
+    // Data source: totals or individual item
+    const displayData = activeItem || aggregated;
+    const displayItem = activeItem || mainItem;
+
     const trackedDetails = userGoals
         .map(goal => {
-            const val = aggregated[goal.nutrient];
+            const val = displayData[goal.nutrient];
             // Show all tracked nutrients, default to 0 if not present
             return {
                 key: goal.nutrient,
                 name: formatNutrientName(goal.nutrient),
                 valueStr: formatNutrientValue(goal.nutrient, val),
                 unit: '', // unit is now included in valueStr
-                confidence: mainItem?.confidence_details?.[goal.nutrient] || mainItem?.confidence || 'high'
+                confidence: displayItem?.confidence_details?.[goal.nutrient] || displayItem?.confidence || 'high'
             };
         })
         .sort((a, b) => {
@@ -103,7 +116,9 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                             {itemName}
                         </h3>
                         <div className="text-sm text-gray-500 font-medium">
-                            {mainItem?.display_portion || mainItem?.serving_size || '1 serving'}
+                            {isMultiItem
+                                ? `${nutrition.length} items`
+                                : (mainItem?.display_portion || mainItem?.serving_size || '1 serving')}
                         </div>
                     </div>
 
@@ -143,6 +158,44 @@ export const FoodLogConfirmation: React.FC<FoodLogConfirmationProps> = ({
                         )}
                     </div>
                 </div>
+
+                {/* Item Slider Pills (multi-item only) */}
+                {isMultiItem && (
+                    <div className="flex gap-1.5 overflow-x-auto pt-1 pb-0.5">
+                        <button
+                            onClick={() => setActiveTab('totals')}
+                            className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${activeTab === 'totals'
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                        >
+                            Totals
+                        </button>
+                        {nutrition.map((item, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => setActiveTab(idx)}
+                                className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${activeTab === idx
+                                        ? 'bg-blue-600 text-white shadow-sm'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                            >
+                                {item.food_name}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {/* Individual item info when a specific tab is selected */}
+                {typeof activeTab === 'number' && activeItem && (
+                    <div className="flex justify-between items-center text-sm bg-blue-50/60 px-3 py-1.5 rounded-md border border-blue-100">
+                        <span className="font-semibold text-gray-700">{activeItem.food_name}</span>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-500">{activeItem.display_portion || activeItem.serving_size || '1 serving'}</span>
+                            <span className="font-mono font-bold text-blue-600">{Math.round(activeItem.calories)} kcal</span>
+                        </div>
+                    </div>
+                )}
 
                 {/* Tracking Details Toggle */}
                 {trackedDetails.length > 0 && (
