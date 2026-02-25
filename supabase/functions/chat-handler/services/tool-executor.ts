@@ -237,7 +237,19 @@ export class ToolExecutor {
     const updateData: any = {};
     if (dietary_preferences) updateData.dietary_preferences = dietary_preferences;
     if (health_goal) updateData.health_goal = health_goal;
-    if (display_units) updateData.display_units = display_units;
+
+    if (display_units) {
+      // Fetch existing profile to merge JSONB units without overwriting
+      try {
+        const { data: profile } = await this.db.getUserProfile(this.context.userId);
+        const existingUnits = profile?.display_units || { volume: 'ml', weight: 'g', energy: 'kcal' };
+        updateData.display_units = { ...existingUnits, ...display_units };
+      } catch (e) {
+        console.error("Failed to fetch existing profile for units merge", e);
+        updateData.display_units = display_units;
+      }
+    }
+
     // allergies handled via health constraints table
     if (notes) updateData.notes = notes;
 

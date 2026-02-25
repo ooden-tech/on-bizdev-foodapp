@@ -195,6 +195,27 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ activeChatId, message
                     </button>
                   )}
 
+                  {msg.message_type === 'progress_logs' && msg.metadata?.progress?.logs?.length > 0 && (
+                    <div className="mt-4 bg-white border border-gray-200 rounded-lg shadow-sm divide-y divide-gray-100 overflow-hidden">
+                      <div className="bg-blue-50 px-3 py-2 border-b border-blue-100">
+                        <span className="font-bold text-blue-900 text-xs uppercase tracking-tight">Today's Log</span>
+                      </div>
+                      {msg.metadata.progress.logs.map((log: any) => (
+                        <div key={log.id} className="flex justify-between items-center p-3 hover:bg-gray-50 transition-colors">
+                          <span className="text-sm font-semibold text-gray-800">{log.food_name || 'Logged Item'}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-blue-600">
+                              {typeof log.calories === 'number' ? `${Math.round(log.calories)} kcal` : ''}
+                            </span>
+                            <span className="text-xs text-gray-400 font-medium whitespace-nowrap">
+                              {log.log_time ? new Date(log.log_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {msg.metadata.warnings && msg.metadata.warnings.length > 0 && (
                     <div className="mt-2 p-2 bg-yellow-50 rounded border border-yellow-100">
                       <p className="text-xs font-bold text-yellow-700 uppercase mb-1">Warnings</p>

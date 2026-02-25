@@ -56,6 +56,15 @@
             items: { type: "string" },
             description: "Array of known allergies"
           },
+          display_units: {
+            type: "object",
+            properties: {
+              volume: { type: "string" },
+              weight: { type: "string" },
+              energy: { type: "string" }
+            },
+            description: "User's preferred display units (e.g., { volume: 'oz' })"
+          },
           notes: {
             type: "string",
             description: "Any extra notes about the user's health profile"

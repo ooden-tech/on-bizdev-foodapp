@@ -375,13 +375,18 @@ function decorateWithContext(message: string, pendingAction: any): string {
           userMessage: message,
           intent: 'view_progress',
           data: {
-            reasoning: 'User wants to see their current progress. Present the data clearly as a table or list with goals vs consumed. IMPORTANT: You MUST also list out the actual items they logged today (found in progress.logs) so they know what they ate. Do NOT audit or analyze — just show the numbers and the items.',
+            reasoning: `User wants to view their progress or daily logs. 
+CRITICAL RULES:
+1. If the user specifically asked to see their LOGS (e.g., "show me my logs"), do NOT mention goals or summarize macros. Just say "Here are your logs for today:".
+2. If the user asked about their GOALS or "how am I doing", provide a brief, friendly 2-3 sentence summary of how they are doing against their macros.
+3. NEVER list out the individual food items you see in progress.logs. The Chat UI will automatically render a rich "Today's Log" card below your text containing all items.
+4. Do NOT generate markdown tables or long bulleted lists. Keep it short and clean.`,
             progress: progressData,
             goals: goalsData
           },
           history: chatHistory
         }, context);
-        response.response_type = 'chat_response';
+        response.response_type = progressData.logs && progressData.logs.length > 0 ? 'progress_logs' : 'chat_response';
         response.data = { progress: progressData, goals: goalsData };
         return {
           ...response,
