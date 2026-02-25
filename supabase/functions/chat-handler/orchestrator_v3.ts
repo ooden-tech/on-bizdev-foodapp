@@ -355,6 +355,38 @@ function decorateWithContext(message: string, pendingAction: any): string {
           response_type: 'action_cancelled',
           steps: thoughts.getSteps()
         };
+      case 'view_progress':
+        // Direct progress display — no InsightAgent forensics
+        console.log('[OrchestratorV3] Branch: view_progress (Direct data readout)');
+        reportStep('Fetching your progress...');
+        const progressExecutor = new ToolExecutor({
+          userId, supabase, timezone, sessionId,
+          healthConstraints: context.healthConstraints
+        });
+        const [progressData, goalsData] = await Promise.all([
+          progressExecutor.getTodayProgress(),
+          progressExecutor.getUserGoals()
+        ]);
+        agentsInvolved.push('progress');
+
+        // Format with ChatAgent for a clean table
+        const chatAgentProgress = new ChatAgent();
+        response.message = await chatAgentProgress.execute({
+          userMessage: message,
+          intent: 'view_progress',
+          data: {
+            reasoning: 'User wants to see their current progress. Present the data clearly as a table or list with goals vs consumed. Do NOT audit or analyze — just show the numbers.',
+            progress: progressData,
+            goals: goalsData
+          },
+          history: chatHistory
+        }, context);
+        response.response_type = 'chat_response';
+        response.data = { progress: progressData, goals: goalsData };
+        return {
+          ...response,
+          steps: thoughts.getSteps()
+        };
       case 'audit':
       case 'patterns':
       case 'reflect':
@@ -746,8 +778,10 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
         }
 
       case 'food_delete':
-        // Handle food log deletion confirmation
-        if (!data.log_id) {
+        // Handle food log deletion — supports single (log_id) or batch (entries array)
+        const deleteEntries = data.entries || (data.log_id ? [data] : []);
+
+        if (deleteEntries.length === 0) {
           await sessionService.clearPendingAction(userId);
           return {
             status: 'error',
@@ -756,23 +790,32 @@ async function logFilteredFood(userId: string, db: DbService, nutritionData: any
           };
         }
 
-        const deletedEntry = await db.deleteFoodLog(userId, data.log_id);
+        const deletedItems: any[] = [];
+        for (const entry of deleteEntries) {
+          const deleted = await db.deleteFoodLog(userId, entry.log_id);
+          if (deleted) deletedItems.push(deleted);
+        }
         await sessionService.clearPendingAction(userId);
 
-        if (!deletedEntry) {
+        if (deletedItems.length === 0) {
           return {
             status: 'error',
-            message: 'The food log entry was not found or has already been removed.',
+            message: 'The food log entries were not found or have already been removed.',
             response_type: 'error'
           };
         }
 
+        const totalDeletedCal = deletedItems.reduce((sum: number, d: any) => sum + (d.calories || 0), 0);
+        const deleteMsg = deletedItems.length === 1
+          ? `✅ Removed ${deletedItems[0].food_name} (${Math.round(deletedItems[0].calories || 0)} cal) from your log! 🗑️`
+          : `✅ Removed ${deletedItems.length} entries (${Math.round(totalDeletedCal)} cal total) from your log! 🗑️`;
+
         return {
           status: 'success',
-          message: `✅ Removed ${deletedEntry.food_name} (${Math.round(deletedEntry.calories || 0)} cal) from your log! 🗑️`,
+          message: deleteMsg,
           response_type: 'food_deleted',
           data: {
-            food_deleted: deletedEntry
+            food_deleted: deletedItems.length === 1 ? deletedItems[0] : deletedItems
           }
         };
 

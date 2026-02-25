@@ -601,4 +601,28 @@ export class DbService {
 
     return data;
   }
+
+  /**
+   * Finds ALL food log entries matching a name (today only).
+   * Used for batch deletion when multiple entries exist.
+   */
+  async findAllFoodLogsByName(userId: string, foodName: string, timezone: string = 'UTC') {
+    const { start, end } = getStartAndEndOfDay(new Date(), timezone);
+
+    const { data, error } = await this.supabase
+      .from('food_log')
+      .select('id, food_name, calories, portion, log_time')
+      .eq('user_id', userId)
+      .gte('log_time', start)
+      .lte('log_time', end)
+      .ilike('food_name', `%${foodName}%`)
+      .order('log_time', { ascending: false });
+
+    if (error) {
+      console.error('[DbService] Error finding food logs by name:', error);
+      throw error;
+    }
+
+    return data || [];
+  }
 }

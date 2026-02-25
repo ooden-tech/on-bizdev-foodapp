@@ -233,10 +233,11 @@ export class ToolExecutor {
   }
 
   async updateUserProfile(data: any) {
-    const { dietary_preferences, health_goal, allergies, notes } = data;
+    const { dietary_preferences, health_goal, allergies, notes, display_units } = data;
     const updateData: any = {};
     if (dietary_preferences) updateData.dietary_preferences = dietary_preferences;
     if (health_goal) updateData.health_goal = health_goal;
+    if (display_units) updateData.display_units = display_units;
     // allergies handled via health constraints table
     if (notes) updateData.notes = notes;
 
@@ -935,17 +936,16 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
   }
 
   /**
-   * Proposes deleting a food log entry (PCC pattern for deletion).
-   * Finds the most recent matching entry from today's logs and creates a pending deletion proposal.
+   * Proposes deleting food log entries (PCC pattern for deletion).
+   * Finds ALL matching entries from today's logs and creates a deletion proposal.
+   * Supports both single and batch deletion.
    */
   async proposeFoodDelete(args: { food_name: string, log_id?: string }) {
     const { food_name, log_id } = args;
     const timezone = this.context.timezone || 'UTC';
     console.log(`[ToolExecutor] proposeFoodDelete input:`, args);
 
-    let logEntry: any = null;
-
-    // If log_id is provided, look up directly
+    // If log_id is provided, look up directly (single delete)
     if (log_id) {
       const { data, error } = await this.context.supabase
         .from('food_log')
@@ -953,15 +953,28 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
         .eq('id', log_id)
         .eq('user_id', this.context.userId)
         .maybeSingle();
-      if (!error && data) logEntry = data;
+
+      if (!error && data) {
+        const proposalId = `delete_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return {
+          proposal_type: 'food_delete',
+          proposal_id: proposalId,
+          pending: true,
+          data: {
+            log_id: data.id,
+            food_name: data.food_name,
+            calories: data.calories,
+            portion: data.portion
+          },
+          message: `Found "${data.food_name}" (${Math.round(data.calories || 0)} cal). Confirm to delete this entry.`
+        };
+      }
     }
 
-    // Otherwise, search by name in today's logs
-    if (!logEntry) {
-      logEntry = await this.db.findFoodLogByName(this.context.userId, food_name, timezone);
-    }
+    // Search by name — find ALL matches in today's logs
+    const allMatches = await this.db.findAllFoodLogsByName(this.context.userId, food_name, timezone);
 
-    if (!logEntry) {
+    if (!allMatches || allMatches.length === 0) {
       return {
         error: true,
         message: `No food log entry matching "${food_name}" found in today's logs. Please check the name and try again.`
@@ -970,17 +983,38 @@ Be reasonable and accurate. Use your knowledge of typical nutrition values. Even
 
     const proposalId = `delete_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    if (allMatches.length === 1) {
+      // Single match — standard behavior
+      const entry = allMatches[0];
+      return {
+        proposal_type: 'food_delete',
+        proposal_id: proposalId,
+        pending: true,
+        data: {
+          log_id: entry.id,
+          food_name: entry.food_name,
+          calories: entry.calories,
+          portion: entry.portion
+        },
+        message: `Found "${entry.food_name}" (${Math.round(entry.calories || 0)} cal). Confirm to delete this entry.`
+      };
+    }
+
+    // Multiple matches — batch deletion proposal
+    const totalCal = allMatches.reduce((sum: number, e: any) => sum + (e.calories || 0), 0);
     return {
       proposal_type: 'food_delete',
       proposal_id: proposalId,
       pending: true,
       data: {
-        log_id: logEntry.id,
-        food_name: logEntry.food_name,
-        calories: logEntry.calories,
-        portion: logEntry.portion
+        entries: allMatches.map((e: any) => ({
+          log_id: e.id,
+          food_name: e.food_name,
+          calories: e.calories,
+          portion: e.portion
+        }))
       },
-      message: `Found "${logEntry.food_name}" (${Math.round(logEntry.calories || 0)} cal). Confirm to delete this entry.`
+      message: `Found ${allMatches.length} entries matching "${food_name}" (${Math.round(totalCal)} cal total). Confirm to delete all.`
     };
   }
 
